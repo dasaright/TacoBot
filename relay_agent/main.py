@@ -724,6 +724,7 @@ class RelayAgent:
             self.preload_path = None
 
     def apply_stream_volume(self, frame, url):
+        """Apply the current tab gain before the bot applies its global baseline."""
         file_id = url.removeprefix("local:")
         if not url.startswith("local:"):
             return clip_gain(frame, 0, self.config.get("music_volume", 100))

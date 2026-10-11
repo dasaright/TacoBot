@@ -226,9 +226,9 @@ class HeaderDragTests(unittest.TestCase):
             root.tk.call(label_menu['postcommand'])
             self.assertEqual(window.listbox.selection(), ('clip',))
             self.assertFalse(any(call.args[0].get('type') == 'local_play' for call in window.send.call_args_list))
-            self.assertEqual(window.toolbar_buttons[0].master, window.direct_checkbox.master)
+            self.assertEqual(window.toolbar_buttons[0].master, window.tab_toolbars[1])
             self.assertEqual(window.update_button.master, window.direct_checkbox.master)
-            self.assertEqual(window.clip_action_buttons[0].master, window.direct_checkbox.master)
+            self.assertEqual(window.clip_action_buttons[0].master, window.tab_toolbars[1])
             from tkinter import ttk
             self.assertEqual(int(ttk.Style(root).lookup('Soundboard.Treeview', 'rowheight')), 33)
             window.header_drag = {'column':'volume','x':100,'moved':True}
