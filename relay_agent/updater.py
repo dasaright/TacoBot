@@ -22,6 +22,8 @@ BUNDLE_NAME = 'TacoBot-Windows.zip'
 MANIFEST_NAME = 'relay-update.json'
 UPDATE_FILES = ('TacoBot.exe', 'README.md', 'Files/ffmpeg.exe', 'Files/yt-dlp.exe')
 MAX_DOWNLOAD_BYTES = 250 * 1024 * 1024
+# Qt and audio runtimes expand beyond the compressed download budget.
+MAX_EXTRACTED_BYTES = 500 * 1024 * 1024
 
 
 def open_url(url):
@@ -84,7 +86,7 @@ def extract_verified_bundle(archive, destination, expected_digest):
         files = [entry for entry in bundle.infolist() if not entry.is_dir()]
         if {entry.filename for entry in files} != set(UPDATE_FILES) or len(files) != len(UPDATE_FILES):
             raise ValueError('Unexpected files in relay update.')
-        if any(entry.file_size == 0 for entry in files) or sum(entry.file_size for entry in files) > MAX_DOWNLOAD_BYTES:
+        if any(entry.file_size == 0 for entry in files) or sum(entry.file_size for entry in files) > MAX_EXTRACTED_BYTES:
             raise ValueError('Invalid relay update size.')
         # Extract only the fixed allowlist; configuration and clips cannot be overwritten.
         for name in UPDATE_FILES:

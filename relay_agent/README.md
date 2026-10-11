@@ -257,3 +257,7 @@ queue songs. They reject mixed/blank frames and require the requested pixels to
 reach the screen with a 95th-percentile latency below 50 ms. Diagnostics include
 reference screenshots and `timing.json`; these tests measure presentation rather
 than only checking the selected tab index.
+
+### Moving from the older Tk desktop to Qt
+
+The older updater has a 250 MB limit for extracted program files. The Qt package exceeds that limit, so older installations need one manual upgrade: close TacoBot, download the latest TacoBot-Windows.zip, and extract its program files into the existing relay folder, replacing them. Keep relay-config.json, its backup, and your clip folders. The new updater retains the 250 MB download cap and allows up to 500 MB after extraction, with the same checksum and fixed file allowlist checks. Future updates use the normal updater.

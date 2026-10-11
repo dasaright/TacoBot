@@ -61,6 +61,20 @@ class UpdateTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'Unexpected'):
                 extract_verified_bundle(archive,root/'target',hashlib.sha256(archive.read_bytes()).hexdigest())
 
+    def test_extracted_limit_is_separate_from_download_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); archive = root / 'update.zip'
+            with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
+                for name in UPDATE_FILES:
+                    bundle.writestr(name, b'x' * 100)
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            with patch('relay_agent.updater.MAX_DOWNLOAD_BYTES', 50), patch('relay_agent.updater.MAX_EXTRACTED_BYTES', 500):
+                extract_verified_bundle(archive, root / 'accepted', digest)
+            with patch('relay_agent.updater.MAX_EXTRACTED_BYTES', 300):
+                with self.assertRaisesRegex(ValueError, 'size'):
+                    extract_verified_bundle(archive, root / 'rejected', digest)
+            self.assertFalse((root / 'rejected').exists())
+
     def test_windows_installer_preserves_settings_and_soundboard(self):
         powershell=shutil.which('powershell.exe')
         if not powershell:self.skipTest('Windows installer test')
