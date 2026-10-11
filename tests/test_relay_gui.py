@@ -271,5 +271,22 @@ class HeaderDragTests(unittest.TestCase):
             for tab in (0, 2, 1, 0, 1):
                 window.notebook.select(tab); root.update()
             self.assertEqual(window.clip_canvases, canvases)
+            window.notebook.select(0); root.update()
+            self.assertEqual(str(window.favorites_view.cget("selectmode")), "extended")
+            self.assertEqual(window.save_playlist_button.master, window.add_selection_button.master)
+            self.assertGreater(window.add_selection_button.winfo_x(), window.save_playlist_button.winfo_x())
+            self.assertTrue(window.add_selection_button.winfo_viewable())
+            self.assertNotEqual(str(window.add_selection_button.cget("image")), str(window.save_playlist_button.cget("image")))
+            queue_ids = list(window.queue_view.get_children())
+            box = window.queue_view.bbox(queue_ids[0])
+            event = SimpleNamespace(widget=window.queue_view, x=box[0]+30, y=box[1]+5,
+                x_root=window.queue_view.winfo_rootx()+box[0]+30, y_root=window.queue_view.winfo_rooty()+box[1]+5, state=0)
+            window.song_mouse_down(event)
+            window.music_drag["moved"] = True
+            window.send.reset_mock()
+            window.music_drag_release(SimpleNamespace(widget=window.queue_view,
+                x_root=window.queue_view.winfo_rootx()+30,
+                y_root=window.queue_view.winfo_rooty()+window.queue_view.winfo_height()-10))
+            self.assertEqual(window.send.call_args_list[0].args[0]["action"], "move")
         finally:
             root.destroy()

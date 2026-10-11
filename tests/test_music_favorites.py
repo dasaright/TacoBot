@@ -77,3 +77,43 @@ class PlaylistBrowseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event["tracks"], [{"title": "Song", "webpage_url": "https://www.youtube.com/watch?v=abc"}])
         self.assertIn("--playlist-end", spawn.call_args.args)
         agent.send_json.assert_not_awaited()
+
+
+class SelectionQueueTests(unittest.TestCase):
+    def test_selected_playlist_and_child_are_not_added_twice(self):
+        w = RelayWindow.__new__(RelayWindow)
+        w.favorites_view = Mock(); w.favorites_view.selection.return_value = ["list", "child", "song"]
+        w.favorites_view.parent.side_effect = lambda key: "list" if key == "child" else ""
+        w.visible_music_rows = Mock(return_value=["list", "child", "song"])
+        w.favorite_items = {"list": {"url": "https://youtube.com/playlist?list=PL1", "playlist": True},
+                            "child": {"url": "https://youtu.be/one"}, "song": {"url": "https://youtu.be/two"}}
+        w.send = Mock(); w.status = Mock()
+        w.add_favorite_selection()
+        self.assertEqual(w.send.call_args.args[0]["items"], [
+            {"url": "https://youtube.com/playlist?list=PL1", "playlist": True},
+            {"url": "https://youtu.be/two", "playlist": False}])
+
+    def test_shift_selection_and_press_preserve_multi_selection(self):
+        w = RelayWindow.__new__(RelayWindow); tree = Mock()
+        tree.identify_region.return_value = "cell"; tree.identify_row.return_value = "three"
+        tree.selection.return_value = ["one"]
+        w.queue_view = Mock(); w.favorites_view = tree
+        w.visible_music_rows = Mock(return_value=["one", "two", "three"])
+        w.music_selection_anchors = {tree: "one"}
+        w.begin_music_drag(tree, SimpleNamespace(x=1, y=1, x_root=10, y_root=10, state=1))
+        tree.selection_set.assert_called_with(["one", "two", "three"])
+        tree.selection.return_value = ["one", "two", "three"]
+        tree.identify_row.return_value = "two"
+        w.begin_music_drag(tree, SimpleNamespace(x=1, y=1, x_root=10, y_root=10, state=0))
+        tree.selection_set.assert_called_with(["one", "two", "three"])
+
+    def test_range_drag_selects_adjacent_visible_rows(self):
+        w = RelayWindow.__new__(RelayWindow); tree = Mock()
+        tree.winfo_rootx.return_value = tree.winfo_rooty.return_value = 0
+        tree.winfo_width.return_value = tree.winfo_height.return_value = 200
+        tree.identify_row.return_value = "three"
+        w.queue_view = Mock(); w.favorites_view = tree
+        w.visible_music_rows = Mock(return_value=["one", "two", "three"])
+        w.music_drag = {"tree": tree, "row": "one", "x": 10, "y": 10, "mode": "range", "moved": False}
+        w.music_drag_motion(SimpleNamespace(x_root=10, y_root=80))
+        tree.selection_set.assert_called_once_with(["one", "two", "three"])

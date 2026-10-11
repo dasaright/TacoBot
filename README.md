@@ -123,6 +123,11 @@ The Music toolbar provides Previous, Play/Pause, and Next. Play changes to
 Pause while music is playing, then returns to Play when paused. The current
 song is highlighted in the queue. Use Ctrl/Shift to select multiple songs, then
 right-click Remove from queue or press Delete to remove the selection together.
+Favorites and expanded playlist songs support Shift/Ctrl selection or vertical
+click-drag selection. Drag the selection across to the queue, or use Add selection
+to queue beside Save Playlist Link. A selected playlist and its selected children
+are included only once. Queue songs can be dragged before/after another row, or
+to the bottom; reordering upcoming songs preserves current playback.
 Saved playlists expand with the arrow to show their first 50 available songs;
 double-click a child song to enqueue it individually. Paste full playlist in the
 Music toolbar controls whether pasted playlist-bearing links enqueue up to 50

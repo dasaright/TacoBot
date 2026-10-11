@@ -176,6 +176,13 @@ def render_button_icon(name, size=28, color="#52d4ba"):
         line([(3,9),(7,9),(12,5),(12,19),(7,15),(3,15),(3,9)])
         arc((9,5,21,19),300,60)
         arc((12,8,18,16),300,60)
+    elif name == "save":
+        line([(4,3),(17,3),(21,7),(21,21),(4,21),(4,3)])
+        line([(8,3),(8,10),(16,10),(16,3)])
+        line([(8,21),(8,15),(17,15),(17,21)])
+    elif name == "arrow":
+        line([(4,12),(20,12)])
+        line([(14,6),(20,12),(14,18)])
     elif name == "pause":
         line([(8,5),(8,19)])
         line([(16,5),(16,19)])
@@ -205,7 +212,7 @@ def add_button_icons(root):
             if isinstance(child, ttk.Button):
                 text = child.cget("text")
                 lower = text.lower()
-                name = next((key for key, terms in (("speech",("tts",)),("refresh",("refresh",)),("check",("check",)),("sync",("sync",)),("stop",("stop",)),("folder",("folder",)),("download",("install",)),("audio",("audio",)),("previous",("previous",)),("next",("next",)),("soundboard",("soundboard",)),("play",("play","youtube"))) if any(term in lower for term in terms)), "play")
+                name = next((key for key, terms in (("save",("save playlist",)),("arrow",("add selection",)),("speech",("tts",)),("refresh",("refresh",)),("check",("check",)),("sync",("sync",)),("stop",("stop",)),("folder",("folder",)),("download",("install",)),("audio",("audio",)),("previous",("previous",)),("next",("next",)),("soundboard",("soundboard",)),("play",("play","youtube"))) if any(term in lower for term in terms)), "play")
                 color = "#10211e" if child.cget("style") == "Primary.TButton" else "#52d4ba"
                 key = (name,color)
                 if key not in cache:
@@ -1269,7 +1276,7 @@ class RelayWindow:
         queue_pane = ttk.Frame(music_split)
         music_split.add(saved_pane, weight=1)
         music_split.add(queue_pane, weight=2)
-        self.favorites_view = ttk.Treeview(saved_pane, columns=("song",), show="tree headings", selectmode="browse")
+        self.favorites_view = ttk.Treeview(saved_pane, columns=("song",), show="tree headings", selectmode="extended")
         self.favorites_view.column("#0", width=24, minwidth=24, stretch=False)
         self.favorites_view.bind("<<TreeviewOpen>>", self.expand_favorite_playlist)
         self.favorites_view.heading("song", text="Favorites / playlists")
@@ -1277,10 +1284,18 @@ class RelayWindow:
         saved_scroll = ttk.Scrollbar(saved_pane, orient="vertical", command=self.favorites_view.yview)
         self.favorites_view.configure(yscrollcommand=saved_scroll.set)
         saved_scroll.pack(side="right", fill="y")
-        ttk.Button(saved_pane, text="Save playlist link", command=self.save_playlist_link).pack(side="bottom", anchor="w", pady=8)
+        saved_buttons = ttk.Frame(saved_pane)
+        saved_buttons.pack(side="bottom", fill="x", pady=8)
+        self.save_playlist_button = ttk.Button(saved_buttons, text="Save Playlist Link", style="Compact.TButton", command=self.save_playlist_link)
+        self.save_playlist_button.pack(side="left")
+        self.add_selection_button = ttk.Button(saved_buttons, text="Add selection to queue", style="Compact.TButton", command=self.add_favorite_selection)
+        self.add_selection_button.pack(side="left", padx=(6, 0))
         self.favorites_view.pack(fill="both", expand=True)
         self.bind_smooth_scroll(self.favorites_view)
         self.favorites_view.bind("<Double-Button-1>", self.play_favorite)
+        self.favorites_view.bind("<ButtonPress-1>", self.favorite_mouse_down)
+        self.favorites_view.bind("<B1-Motion>", self.music_drag_motion)
+        self.favorites_view.bind("<ButtonRelease-1>", self.music_drag_release)
         self.favorites_view.bind("<Button-3>", self.favorite_context_menu)
         self.favorite_menu = themed_menu(root)
         self.favorite_menu.add_command(label="Remove saved item", command=self.remove_favorite)
@@ -1295,7 +1310,8 @@ class RelayWindow:
         self.queue_menu.add_command(label="Remove from queue", command=self.remove_queue_song)
         self.queue_pressed = None
         self.queue_view.bind("<ButtonPress-1>", self.song_mouse_down)
-        self.queue_view.bind("<ButtonRelease-1>", self.song_selected)
+        self.queue_view.bind("<ButtonRelease-1>", self.music_drag_release)
+        self.queue_view.bind("<B1-Motion>", self.music_drag_motion)
         self.queue_view.bind("<Delete>", lambda event: self.remove_queue_song())
         self.queue_view.column("song", width=400)
         self.queue_view.tag_configure("current", background="#25443f", foreground="#75e4ce", font=("Segoe UI", 10, "bold"))
@@ -2408,8 +2424,123 @@ class RelayWindow:
         if title and title.strip():
             self.save_music_favorite({"url": url, "title": title.strip(), "playlist": True})
 
+    def visible_music_rows(self, tree, parent=""):
+        result = []
+        for key in tree.get_children(parent):
+            result.append(key)
+            if tree.item(key, "open"):
+                result.extend(self.visible_music_rows(tree, key))
+        return result
+
+    def begin_music_drag(self, tree, event):
+        self.music_drag = None
+        if tree.identify_region(event.x, event.y) != "cell":
+            return
+        row = tree.identify_row(event.y)
+        if not row:
+            return
+        rows = self.visible_music_rows(tree)
+        selected = list(tree.selection())
+        modifiers = getattr(event, "state", 0)
+        anchor = getattr(self, "music_selection_anchors", {}).get(tree, row)
+        kept = row in selected and not modifiers & 5
+        if modifiers & 1 and anchor in rows:
+            start, end = sorted((rows.index(anchor), rows.index(row)))
+            selected = rows[start:end + 1]
+        elif modifiers & 4:
+            selected = [key for key in selected if key != row] if row in selected else selected + [row]
+        elif not kept:
+            selected = [row]
+        tree.selection_set(selected)
+        tree.focus(row)
+        if not hasattr(self, "music_selection_anchors"):
+            self.music_selection_anchors = {}
+        if not modifiers & 1:
+            self.music_selection_anchors[tree] = row
+        self.music_drag = {"tree": tree, "row": row, "x": event.x_root, "y": event.y_root,
+                           "mode": "move" if kept or tree is self.queue_view else "range", "moved": False, "modifiers": modifiers}
+        return "break"
+
+    def favorite_mouse_down(self, event):
+        return self.begin_music_drag(self.favorites_view, event)
+
+    def music_drag_motion(self, event):
+        drag = getattr(self, "music_drag", None)
+        if not drag or abs(event.x_root - drag["x"]) + abs(event.y_root - drag["y"]) < 6:
+            return "break"
+        drag["moved"] = True
+        tree = drag["tree"]
+        x, y = event.x_root - tree.winfo_rootx(), event.y_root - tree.winfo_rooty()
+        range_drag = drag["mode"] == "range" or (tree is self.favorites_view and abs(event.y_root - drag["y"]) > abs(event.x_root - drag["x"]))
+        if range_drag and tree is self.favorites_view and 0 <= x < tree.winfo_width() and 0 <= y < tree.winfo_height():
+            row = tree.identify_row(y)
+            rows = self.visible_music_rows(tree)
+            if row in rows and drag["row"] in rows:
+                start, end = sorted((rows.index(drag["row"]), rows.index(row)))
+                tree.selection_set(rows[start:end + 1])
+        else:
+            self.status.set("Release over the queue to add or reposition the selection.")
+        if y < 24:
+            tree.yview_scroll(-1, "units")
+        elif y > tree.winfo_height() - 20:
+            tree.yview_scroll(1, "units")
+        return "break"
+
+    def music_drag_release(self, event):
+        drag = getattr(self, "music_drag", None)
+        self.music_drag = None
+        if not drag:
+            if event.widget is self.queue_view:
+                return self.song_selected(event)
+            return
+        if not drag["moved"]:
+            if not drag.get("modifiers", 0) & 5:
+                drag["tree"].selection_set(drag["row"])
+            if drag["tree"] is self.queue_view:
+                self.song_selected(event)
+            return "break"
+        self.queue_pressed = None
+        queue = self.queue_view
+        x, y = event.x_root - queue.winfo_rootx(), event.y_root - queue.winfo_rooty()
+        if 0 <= x < queue.winfo_width() and 0 <= y < queue.winfo_height():
+            if drag["tree"] is self.favorites_view:
+                self.add_favorite_selection()
+            else:
+                selected = list(queue.selection())
+                if selected:
+                    before = queue.identify_row(y) or None
+                    if before:
+                        box = queue.bbox(before)
+                        rows = list(queue.get_children())
+                        if box and y >= box[1] + box[3] / 2:
+                            index = rows.index(before) + 1
+                            before = rows[index] if index < len(rows) else None
+                    self.send({"type": "music_control", "guild_id": None, "action": "move",
+                               "track_ids": selected, "before_id": before})
+                    self.refresh_music()
+        return "break"
+
+    def add_favorite_selection(self):
+        selected = set(self.favorites_view.selection())
+        items = []
+        for key in self.visible_music_rows(self.favorites_view):
+            item = self.favorite_items.get(key)
+            # Selecting a playlist also includes its selected child songs once.
+            if key not in selected or not item:
+                continue
+            if self.favorites_view.parent(key) in selected:
+                continue
+            items.append({"url": item["url"], "playlist": bool(item.get("playlist"))})
+        if items:
+            self.send({"type": "music_enqueue", "guild_id": None, "items": items})
+            self.status.set(f"Adding {len(items)} selected songs/playlists…")
+        else:
+            self.status.set("Select saved songs or playlists first.")
+
     def song_mouse_down(self, event):
+        result = self.begin_music_drag(self.queue_view, event)
         self.queue_pressed = self.queue_view.identify_row(event.y) if self.queue_view.identify_region(event.x, event.y) == "cell" else None
+        return result
 
     def song_selected(self, event):
         pressed = self.queue_pressed
@@ -2705,7 +2836,7 @@ class RelayWindow:
             if "music" in event:
                 music = event["music"]
                 self.current_song.set(music.get("current") or "Your next song starts here")
-                if music != self.last_music:
+                if music != self.last_music and not getattr(self, "music_drag", None):
                     self.last_music = music
                     selected_ids = self.queue_view.selection()
                     self.queue_view.delete(*self.queue_view.get_children())
