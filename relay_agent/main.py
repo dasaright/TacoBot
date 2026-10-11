@@ -65,6 +65,59 @@ def clip_gain(frame, adjustment, master_volume=100):
     return samples.tobytes()
 
 
+def clip_sort_keys(saved):
+    """Restore stable multi-column sorting, ignoring malformed config entries."""
+    keys = []
+    if isinstance(saved, (list, tuple)):
+        for entry in saved:
+            if (isinstance(entry, (list, tuple)) and len(entry) == 2
+                    and entry[0] in ("name", "shared", "label")
+                    and isinstance(entry[1], bool)
+                    and entry[0] not in [column for column, _ in keys]):
+                keys.append((entry[0], entry[1]))
+    return keys or [("name", False)]
+
+
+class RetainedTabs(ttk.Frame):
+    """Keep pages mapped and laid out; switching only raises the selected page.
+
+    Native Notebook unmaps inactive pages, forcing their children to repaint
+    piecemeal on each visit. Stacking opaque frames retains their geometry and
+    preloaded graphics while preserving the small Notebook API used here.
+    """
+    def __init__(self, master):
+        super().__init__(master)
+        self._pages = []
+        self._selected = None
+
+    def add(self, page, **options):
+        self._pages.append(page)
+        page.place(x=0, y=0, relwidth=1, relheight=1)
+        if self._selected is None:
+            self._selected = str(page)
+        self.nametowidget(self._selected).tkraise()
+
+    def tabs(self):
+        return tuple(str(page) for page in self._pages)
+
+    def index(self, page):
+        if isinstance(page, int):
+            if 0 <= page < len(self._pages):
+                return page
+            raise tk.TclError("Tab index out of range")
+        return self.tabs().index(str(page))
+
+    def select(self, page=None):
+        if page is None:
+            return self._selected
+        selected = str(self._pages[self.index(page)])
+        if selected != self._selected:
+            self._selected = selected
+            self.nametowidget(selected).tkraise()
+            self.event_generate("<<NotebookTabChanged>>")
+        return self._selected
+
+
 def sorted_clip_ids(files, origins, settings, sort_keys):
     ids = sorted(files, key=lambda key: files[key].stem.casefold())
     for column, reverse in reversed(sort_keys):
@@ -1170,7 +1223,7 @@ class RelayWindow:
         audio_bar.pack_propagate(False)
         ttk.Style(root).configure("Compact.TButton", padding=(6, 7), font=("Segoe UI", 9))
         self.identity = tk.StringVar(value="Connecting your relay")
-        self.notebook = ttk.Notebook(root)
+        self.notebook = RetainedTabs(root)
         self.notebook.pack(fill="both", expand=True, padx=28)
         self.tab_buttons = []
         for index, text in enumerate(("YouTube Music", "Soundboard", "TTS")):
@@ -1353,9 +1406,8 @@ class RelayWindow:
         self.folder_label = ttk.Label(details, textvariable=self.folder, width=30, anchor="e", style="Muted.TLabel")
         self.folder_label.pack(side="left")
         self.sync_running = False
-        self.sort_keys = [("name", False)]
-        self.sort_column = "name"
-        self.sort_reverse = False
+        self.sort_keys = clip_sort_keys(config.get("clip_sort_keys"))
+        self.sort_column, self.sort_reverse = self.sort_keys[0]
         self.clip_origins = {}
         self.listbox = ttk.Treeview(right, columns=("name", "volume", "shared", "label"), show="headings", selectmode="browse", style="Soundboard.Treeview")
         self.listbox.tag_configure("even", background="#1b2027")
@@ -1913,6 +1965,8 @@ class RelayWindow:
         keys = getattr(self, "sort_keys", [("name", False)])
         reverse = not keys[0][1] if keys and keys[0][0] == column else False
         self.sort_keys = [(column, reverse)] + [(c, r) for c, r in keys if c != column]
+        self.config["clip_sort_keys"] = [list(key) for key in self.sort_keys]
+        self.save()
         self.render_clips()
 
     def render_clips(self):

@@ -151,7 +151,7 @@ trigger a new executable build.
 
 ## Shared clips
 
-The Soundboard tab lists your chosen local folder and the separate `sharedclips` folder beside the executable. Name sorts filenames; Shared toggles checked-first / unchecked-first. Earlier sort choices remain as tie-breakers. Click a filename to play. **Sync clips** uploads new files from `sharedclips` and downloads missing shared files. Local files are never uploaded. Put files into `sharedclips` to share them. Shared files are public in this repository. Sync adds files only; rename conflicts and keep clips under 20 MB. Updates preserve both folders.
+The Soundboard tab lists your chosen local folder and the separate `sharedclips` folder beside the executable. Name sorts filenames; Shared toggles checked-first / unchecked-first. Earlier sort choices remain as tie-breakers. Sort priority and direction are saved in `relay-config.json` and survive refreshes, restarts, and updates. Click a filename to play. **Sync clips** uploads new files from `sharedclips` and downloads missing shared files. Local files are never uploaded. Put files into `sharedclips` to share them. Shared files are public in this repository. Sync adds files only; rename conflicts and keep clips under 20 MB. Updates preserve both folders.
 
 Bot administrator: configure `SHARED_CLIPS_GITHUB_TOKEN` on Railway with a fine-grained GitHub token restricted to `dasaright/TacoBot`, Contents read/write. Approved relay tokens authorize sync. The GitHub token stays on the bot and is never distributed in the executable.
 

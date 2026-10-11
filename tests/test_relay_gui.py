@@ -68,6 +68,7 @@ class SortingTests(unittest.TestCase):
         window.preload_clip_widgets = Mock()
         window.root = Mock()
         window.config = {}
+        window.save = Mock()
         window.sort_keys = [('name', False)]
         window.sort_column = 'name'
         window.sort_reverse = False
@@ -75,6 +76,46 @@ class SortingTests(unittest.TestCase):
         self.assertEqual(window.file_ids, ['3','2','1'])
         window.sort_clips('shared')
         self.assertEqual(window.file_ids, ['2','1','3'])
+        self.assertEqual(window.config['clip_sort_keys'], [['shared', True], ['name', False]])
+        self.assertEqual(window.save.call_count, 2)
+
+    def test_sort_config_round_trip_preserves_priority_and_direction(self):
+        import json
+        from relay_agent.main import clip_sort_keys
+        saved = [["shared", False], ["label", True], ["name", False]]
+        self.assertEqual(clip_sort_keys(json.loads(json.dumps(saved))),
+                         [("shared", False), ("label", True), ("name", False)])
+        self.assertEqual(clip_sort_keys(None), [("name", False)])
+        self.assertEqual(clip_sort_keys([["volume", False], ["name", "false"]]), [("name", False)])
+        self.assertEqual(clip_sort_keys([["label", True], ["label", False], None]), [("label", True)])
+
+    def test_pages_stay_mapped_across_switches_without_rebuilding(self):
+        import tkinter as tk
+        from relay_agent.main import RetainedTabs
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("Requires desktop display; Windows packaging CI runs this")
+        try:
+            tabs = RetainedTabs(root)
+            tabs.pack(fill="both", expand=True)
+            pages = [tk.Frame(tabs) for _ in range(3)]
+            for page in pages:
+                tabs.add(page)
+                tk.Label(page, text="Cached content").pack()
+            root.update()
+            unmapped = []
+            for page in pages:
+                page.bind("<Unmap>", lambda event: unmapped.append(event.widget))
+            for index in [1, 2, 0, 2, 1]:
+                tabs.select(index)
+                root.update()
+                self.assertEqual(tabs.index(tabs.select()), index)
+                self.assertTrue(all(page.winfo_ismapped() for page in pages))
+                self.assertTrue(all(page.winfo_width() == tabs.winfo_width() for page in pages))
+            self.assertEqual(unmapped, [])
+        finally:
+            root.destroy()
 
 class SongClickTests(unittest.TestCase):
     def test_song_click_sends_stable_song_id(self):
