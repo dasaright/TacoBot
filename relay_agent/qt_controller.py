@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QApplication, QMenu, QFileDialog, QInputDialog, Q
     QTreeWidget, QAbstractItemView)
 
 from . import main as engine
+from . import clip_catalog
 from .qt_adapters import Value, Control, Text, Root, Tree
 
 
@@ -70,6 +71,40 @@ class Controller(engine.RelayWindow):
     def save(self):
         if self.started:
             engine.save_config(self.config)
+            try:
+                clip_catalog.save_folders(self.agent.local_files, self.config)
+            except (OSError, ValueError) as exc:
+                self.status.set('Clip metadata could not be saved: '+str(exc))
+
+    def refresh_files(self):
+        folder = self.folder.get()
+        self.scan_generation = getattr(self, 'scan_generation', 0) + 1
+        generation = self.scan_generation
+        snapshot = {'clip_settings': {key: dict(value) for key, value in self.config.get('clip_settings', {}).items()},
+                    'clip_labels': dict(self.config.get('clip_labels', {}))}
+        self.status.set('Scanning audio files…')
+        def scan():
+            try:
+                files = engine.scan_audio_folder(folder) if folder else {}
+                origins = {key: 'Local' for key in files}
+                engine.SHARED_CLIPS_DIR.mkdir(parents=True, exist_ok=True)
+                shared = engine.scan_audio_folder(str(engine.SHARED_CLIPS_DIR))
+                settings, colors, errors = {}, {}, []
+                folders = [(folder, files)] if folder else []
+                if not folder or Path(folder).resolve() != engine.SHARED_CLIPS_DIR.resolve():
+                    folders.append((engine.SHARED_CLIPS_DIR, shared))
+                for directory, clips in folders:
+                    try:
+                        loaded, labels = clip_catalog.load_folder(directory, clips, snapshot)
+                        settings.update(loaded); colors.update(labels)
+                    except (OSError, ValueError) as exc:
+                        errors.append(str(exc))
+                files.update(shared); origins.update({key: 'Shared' for key in shared})
+                self.agent.events.put({'library': files, 'origins': origins, 'generation': generation,
+                    'clip_metadata': settings, 'clip_colors': colors, 'metadata_error': '; '.join(errors)})
+            except Exception as exc:
+                self.agent.events.put({'error': str(exc)})
+        threading.Thread(target=scan, daemon=True).start()
 
     def auto_changed(self,value):
         self.config['auto_update']=value; self.save(); self.next_update_check=0
@@ -315,18 +350,29 @@ class Controller(engine.RelayWindow):
             self.update_check_running=False; self.view.check.setEnabled(True)
             if event.get('update_stage') is not None: self.pending_update=(event['update_stage'],event.get('update_manual',False)); self.update_idle_since=None; self.view.install.setEnabled(True)
         if 'library' in event and event['generation']==self.scan_generation:
+            self.config.setdefault('clip_settings', {}).update(event.get('clip_metadata', {}))
+            self.config.setdefault('clip_labels', {}).update(event.get('clip_colors', {}))
             self.agent.local_files=event['library']; self.clip_origins=event['origins']; self.render_clips()
+            if event.get('metadata_error'): self.status.set(event['metadata_error'])
             if self.started: asyncio.run_coroutine_threadsafe(self.agent.preload_normalization(dict(self.agent.local_files)),self.loop)
         if event.get('import_done') and event.get('folder')==self.folder.get(): self.refresh_files()
         if event.get('sync_done'): self.sync_running=False; self.refresh_files()
         if event.get('share_done'):
             self.editing_clips.discard(event['share_done'])
             if not event.get('share_error'):
-                key=hashlib.sha256(str(Path(event['shared_path']).resolve()).encode()).hexdigest(); self.config.setdefault('clip_settings',{})[key]=event['share_settings']; self.save(); self.sync_shared()
+                path=Path(event['shared_path']); key=hashlib.sha256(str(path.resolve()).encode()).hexdigest(); self.config.setdefault('clip_settings',{})[key]=event['share_settings']
+                if self.started:
+                    try: clip_catalog.save_folders({key: path}, self.config)
+                    except (OSError, ValueError) as exc: self.status.set(str(exc))
+                self.save(); self.sync_shared()
             self.refresh_files()
         if event.get('clip_edit_done'):
             key=event['clip_edit_done']; self.editing_clips.discard(key)
             if event.get('renamed_path'):
+                old_path=self.agent.local_files.get(key)
+                if self.started and old_path:
+                    try: clip_catalog.rename_entry(old_path,event['renamed_path'])
+                    except (OSError, ValueError) as exc: self.status.set(str(exc))
                 settings=self.config.setdefault('clip_settings',{}); old=settings.pop(key,None)
                 if old is not None: settings[hashlib.sha256(str(Path(event['renamed_path']).resolve()).encode()).hexdigest()]=old; self.save()
             self.refresh_files()
