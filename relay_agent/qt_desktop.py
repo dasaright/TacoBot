@@ -10,9 +10,10 @@ from PySide6.QtGui import QColor, QPainter, QPen, QIcon, QImage, QPixmap, QDrag,
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedLayout, QPushButton, QLabel, QCheckBox, QLineEdit, QSlider, QTableView,
     QStyledItemDelegate, QTreeWidget, QAbstractItemView, QSplitter, QTextEdit,
-    QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView)
+    QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView, QSystemTrayIcon)
 
 from . import main as engine
+from .app_icon import application_icon
 
 STYLE = '''
 QWidget { background:#14171c; color:#dce5ef; font-family:"Segoe UI"; font-size:13px; }
@@ -237,11 +238,13 @@ class Desktop(QMainWindow):
     def __init__(self, config, start_agent=True):
         super().__init__(); self.config = config; self.closing = False
         self.setWindowTitle('TacoBot'); self.resize(1280, 780); self.setMinimumSize(1180, 620); self.setAcceptDrops(True)
+        self.setWindowIcon(application_icon())
         self.setStyleSheet(STYLE)
         from PySide6.QtWidgets import QStyle
         self.selected_state = QStyle.StateFlag.State_Selected
         shell = QWidget(); self.setCentralWidget(shell); layout = QVBoxLayout(shell); layout.setContentsMargins(22, 16, 22, 12); layout.setSpacing(12)
-        header = QWidget(); top = row(header); brand = QLabel('▥  TacoBot'); brand.setStyleSheet('font-size:21px; font-weight:600;'); top.addWidget(brand)
+        header = QWidget(); top = row(header); logo=QLabel(); logo.setPixmap(self.windowIcon().pixmap(32,32)); top.addWidget(logo)
+        brand = QLabel('TacoBot'); brand.setStyleSheet('font-size:21px; font-weight:600;'); top.addWidget(brand)
         self.tabs = []
         for n, (title, symbol) in enumerate([('YouTube Music','play'),('Soundboard','soundboard'),('TTS','speech')]):
             tab = QPushButton(title); tab.setCheckable(True); tab.setFixedSize(155 if n == 0 else 140 if n == 1 else 88, 44); tab.setIcon(icon(symbol)); tab.setIconSize(QSize(28,28)); tab.pressed.connect(lambda n=n:self.select_tab(n)); top.addWidget(tab); self.tabs.append(tab)
@@ -261,6 +264,10 @@ class Desktop(QMainWindow):
         footer = QWidget(); foot = row(footer); self.status = QLabel('Connecting your relay'); self.status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); foot.addWidget(self.status,1); self.identity = QLabel(config.get('relay_name','Personal relay')); foot.addWidget(self.identity); foot.addWidget(QLabel(f'TacoBot v1.{engine.RELAY_BUILD}')); layout.addWidget(footer)
         from .qt_controller import Controller
         self.controller = Controller(self, config, start_agent=start_agent)
+        self.tray = QSystemTrayIcon(self.windowIcon(), self); self.tray.setToolTip('TacoBot')
+        tray_menu=QMenu(self); tray_menu.addAction('Open TacoBot',self.restore_window); tray_menu.addAction('Quit',self.close)
+        self.tray.setContextMenu(tray_menu); self.tray.activated.connect(self.tray_activated)
+        if start_agent and QSystemTrayIcon.isSystemTrayAvailable(): self.tray.show()
         self.select_tab(0)
         self.paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self); self.paste_shortcut.setContext(Qt.ShortcutContext.WindowShortcut); self.paste_shortcut.activated.connect(self.clipboard_play)
         # Pre-render every page once at startup. No object creation, file scan,
@@ -272,6 +279,12 @@ class Desktop(QMainWindow):
         self.pages.setCurrentIndex(index)
         self.page_widgets[index].setFocus(Qt.FocusReason.OtherFocusReason)
         for n, tab in enumerate(self.tabs): tab.setChecked(n == index)
+
+    def restore_window(self):
+        self.showNormal(); self.raise_(); self.activateWindow()
+
+    def tray_activated(self,reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,QSystemTrayIcon.ActivationReason.DoubleClick): self.restore_window()
 
     def volume(self, layout, key):
         layout.addWidget(QLabel('Volume')); slider = QSlider(Qt.Orientation.Horizontal); slider.setRange(0,100); slider.setValue(self.config.get(key,100)); slider.setFixedWidth(105)
@@ -294,7 +307,7 @@ class Desktop(QMainWindow):
         buttons = QWidget(); controls = row(buttons); controls.addWidget(button('Save Playlist Link', lambda:self.controller.save_playlist_link(),'save')); controls.addWidget(button('Add selection to queue',lambda:self.controller.add_favorite_selection(),'arrow')); controls.addStretch(); left.addWidget(buttons)
         self.queue = MusicTree(self,'queue'); self.queue.setRootIsDecorated(False)
         self.favorites.itemDoubleClicked.connect(lambda item,column:self.controller.enqueue_item(item)); self.favorites.itemExpanded.connect(lambda item:self.controller.expand_playlist(item))
-        self.queue.itemClicked.connect(lambda item,column:self.controller.select_song(item)); split.addWidget(saved); split.addWidget(self.queue); split.setSizes([440,700]); area.addWidget(split,1)
+        self.queue.itemDoubleClicked.connect(lambda item,column:self.controller.select_song(item)); split.addWidget(saved); split.addWidget(self.queue); split.setSizes([440,700]); area.addWidget(split,1)
         QShortcut(QKeySequence(Qt.Key.Key_Delete),self.queue,activated=lambda:self.controller.remove_queue_song())
 
     def build_clips(self):
@@ -349,4 +362,5 @@ class Desktop(QMainWindow):
     def closeEvent(self,event):
         if not self.closing:
             self.closing = True; self.controller.shutdown()
+            self.tray.hide()
         event.accept()

@@ -261,3 +261,11 @@ than only checking the selected tab index.
 ### Moving from the older Tk desktop to Qt
 
 The older updater has a 250 MB limit for extracted program files. The Qt package exceeds that limit, so older installations need one manual upgrade: close TacoBot, download the latest TacoBot-Windows.zip, and extract its program files into the existing relay folder, replacing them. Keep relay-config.json, its backup, and your clip folders. The new updater retains the 250 MB download cap and allows up to 500 MB after extraction, with the same checksum and fixed file allowlist checks. Future updates use the normal updater.
+
+### Portable soundboard metadata
+
+Selecting/scanning a local clips folder creates `tacobot-clips.json` in that folder. It stores filenames, labels, label colors, and per-clip volume, and imports existing relay settings on first use. Shared clips have their own metadata file in `sharedclips`. Metadata takes precedence over machine-specific path IDs when loading, so moving the entire clips folder or selecting it in a fresh install restores its settings. Keep this JSON file and its `.bak` backup with your audio. Relay renames preserve the entry; temporarily missing clips retain their metadata. Tokens and other private relay settings are never written there. Unreadable metadata is preserved and reported instead of silently reset.
+
+In the music queue, single-click selects; double-click plays. Favorites also use double-click to add music.
+
+The window, Windows executable/taskbar, and running tray icon use `relay_agent/assets/taco.png` / `taco.ico`. The icon was generated with the built-in image-generation tool from the prompt: a single standalone taco, anime illustration with crisp outlines and cel shading, transparent background, no plate, no face, no text; a compact silhouette readable as a small Windows icon.

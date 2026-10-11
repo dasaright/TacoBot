@@ -11,11 +11,13 @@ if not __package__:
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMessageBox
 from relay_agent import main as engine
 from relay_agent.qt_desktop import Desktop
+from relay_agent.app_icon import configure_application
 
 
 def application():
     app=QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName('TacoBot'); app.setOrganizationName('TacoBot'); app.setStyle('Fusion')
+    configure_application(app)
     return app
 
 
