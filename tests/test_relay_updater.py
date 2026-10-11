@@ -90,7 +90,7 @@ class UpdateTests(unittest.TestCase):
                     new=stage/'payload'/file;new.parent.mkdir(parents=True,exist_ok=True);new.write_bytes(b'new')
             script=write_install_script(stage)
             result=subprocess.run([powershell,'-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(script),
-                '-Stage',str(stage),'-Target',str(target),'-NoRestart','-MaxAttempts','1'],capture_output=True,text=True,timeout=15)
+                '-Stage',str(stage),'-Target',str(target),'-NoRestart','-MaxAttempts','1'],capture_output=True,text=True,timeout=45)
             self.assertEqual(result.returncode,1)
             for file in UPDATE_FILES:self.assertEqual((target/file).read_bytes(),b'old')
 

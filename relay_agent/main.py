@@ -593,6 +593,7 @@ class RelayAgent:
             await self.websocket.send(payload)
 
     async def browse_playlist(self, key, url):
+        """Preview up to 50 available songs without starting audio playback."""
         process = None
         try:
             args = youtube_common_args(self.config)
