@@ -109,7 +109,9 @@ existing relay-config.json when replacing the program.
 
 ## Desktop controls
 
-Music, Soundboard, and TTS have separate tabs and toolbars. Audio routing,
+Music, Soundboard, and TTS have separate tabs and toolbars. Panels are prepared
+on startup, and soundboard graphics and toolbar geometry are retained when
+switching tabs. Audio routing,
 Direct playback, automatic updates, and update/install controls stay on the
 right beside the tabs. Each tab has an independent, saved 0–100% volume slider;
 changes apply immediately to that relay's audio, including an active stream.

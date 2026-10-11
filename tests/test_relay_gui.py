@@ -267,5 +267,9 @@ class HeaderDragTests(unittest.TestCase):
             window.notebook.select(1); root.update()
             self.assertFalse(window.paste_playlist_switch.winfo_viewable())
             self.assertTrue(window.listbox.winfo_ismapped())
+            canvases = dict(window.clip_canvases)
+            for tab in (0, 2, 1, 0, 1):
+                window.notebook.select(tab); root.update()
+            self.assertEqual(window.clip_canvases, canvases)
         finally:
             root.destroy()

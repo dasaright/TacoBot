@@ -1160,6 +1160,7 @@ class RelayWindow:
         ttk.Label(brand, text="TacoBot", style="Brand.TLabel").pack(side="left")
         audio_bar = ttk.Frame(top_bar)
         audio_bar.pack(fill="x", pady=(22, 0))
+        audio_bar.pack_propagate(False)
         ttk.Style(root).configure("Compact.TButton", padding=(6, 7), font=("Segoe UI", 9))
         self.identity = tk.StringVar(value="Connecting your relay")
         self.notebook = ttk.Notebook(root)
@@ -1404,6 +1405,8 @@ class RelayWindow:
         add_button_icons(root)
         self.set_music_playing(False)
         root.update_idletasks()
+        audio_bar.configure(height=max(toolbar.winfo_reqheight() for toolbar in self.tab_toolbars))
+        self.prewarm_tabs()
         root.minsize(max(1160, max(audio_bar.winfo_reqwidth(), tabs_bar.winfo_reqwidth()) + 56), 620)
         self.update_check_running = False
         self.pending_update = None
@@ -1617,7 +1620,6 @@ class RelayWindow:
         return "break"
 
     def update_tabs(self, event=None):
-        self.clip_position_signature = None
         selected = self.notebook.index(self.notebook.select())
         for index, button in enumerate(self.tab_buttons):
             button.configure(style="SelectedTab.TButton" if index == selected else "OtherTab.TButton")
@@ -1625,12 +1627,24 @@ class RelayWindow:
             toolbar.pack_forget()
             if index == selected:
                 toolbar.pack(fill="x")
-        self.root.after_idle(self.settle_clip_tab_layout)
+        if selected == 1:
+            self.root.after_idle(self.position_clip_widgets)
 
     def settle_clip_tab_layout(self):
-        self.root.update_idletasks()
-        self.clip_position_signature = None
         self.position_clip_widgets()
+
+    def prewarm_tabs(self):
+        """Prepare every panel once; retain geometry and graphics between visits."""
+        selected = self.notebook.select()
+        for index in range(3):
+            self.notebook.select(index)
+            self.update_tabs()
+            self.root.update_idletasks()
+            if index == 1:
+                self.position_clip_widgets()
+        self.notebook.select(selected)
+        self.update_tabs()
+
 
     def restore_direct_mode(self):
         self.direct_mode.set(True)
@@ -2196,12 +2210,6 @@ class RelayWindow:
         self.clip_scroll_offset = offset
         # Header height changes with Windows DPI and Tk's first mapped layout.
         # Locate the actual row body instead of reusing an unmapped bbox.
-        if self.listbox.winfo_ismapped():
-            probe_x = min(self.listbox.winfo_width() - 3, self.clip_body_left + 20)
-            body_top = next((y for y in range(min(200, self.listbox.winfo_height()))
-                             if self.listbox.identify_region(probe_x, y) == "cell"), None)
-            if body_top is not None:
-                self.clip_body_top = body_top
         if first_box:
             self.clip_body_top = first_box[1]
         y = self.clip_body_top
