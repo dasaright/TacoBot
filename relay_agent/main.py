@@ -1191,13 +1191,7 @@ def copy_soundboard_files(paths, folder, ffmpeg_path=FFMPEG_PATH):
 
 def create_root():
     from tkinterdnd2 import TkinterDnD
-    root = TkinterDnD.Tk()
-    if __package__:
-        from .presentation import enable_buffered_presentation
-    else:
-        from presentation import enable_buffered_presentation
-    enable_buffered_presentation(root)
-    return root
+    return TkinterDnD.Tk()
 
 
 class RelayWindow:

@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - "relay_agent/**"
+      - "tests/**"
       - ".github/workflows/build-relay.yml"
 
 permissions:
@@ -51,16 +52,12 @@ jobs:
       - name: Smoke test desktop panels
         timeout-minutes: 1
         run: >-
-          python -c "import tkinter as tk; from unittest.mock import patch;
-          from relay_agent.main import RelayWindow, create_root;
-          root=create_root();
-          mock=patch('threading.Thread.start'); mock.start();
-          print('Constructing desktop panels',flush=True);
-          window=RelayWindow(root,{}); print('Panels constructed',flush=True); root.update();
-          assert window.queue_view.winfo_exists();
-          assert window.listbox.winfo_exists();
-          assert window.toggle_button.winfo_exists();
-          root.destroy(); mock.stop(); print('Desktop panels initialized')"
+          python -c "from relay_agent.desktop import application;
+          from relay_agent.qt_desktop import Desktop;
+          app=application(); window=Desktop({},start_agent=False); window.show(); app.processEvents();
+          assert window.pages.count()==3;
+          [window.select_tab(n) for n in range(3)]; app.processEvents();
+          window.close(); print('Qt desktop panels initialized')"
 
       - name: Test relay and Windows installer
         run: python -m unittest discover -s tests -v
@@ -76,7 +73,7 @@ jobs:
       - name: Build relay executable
         run: >-
           pyinstaller --clean --noconfirm --onefile --windowed --paths .
-          --collect-all ctranslate2 --collect-all sentencepiece --collect-all piper --collect-all onnxruntime --collect-all sounddevice --collect-all _sounddevice_data --collect-data certifi --collect-all tkinterdnd2 --name TacoBot relay_agent/main.py
+          --collect-all ctranslate2 --collect-all sentencepiece --collect-all piper --collect-all onnxruntime --collect-all sounddevice --collect-all _sounddevice_data --collect-data certifi --collect-all tkinterdnd2 --name TacoBot relay_agent/desktop.py
 
       - name: Download current yt-dlp
         shell: pwsh
