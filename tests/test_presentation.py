@@ -74,9 +74,17 @@ class PresentationTests(unittest.TestCase):
             for tab in [0, 1, 2] * 20:
                 started = time.perf_counter()
                 window.press_tab(tab)
-                root.update_idletasks()
+                root.update()
                 ctypes.windll.dwmapi.DwmFlush()
+                presented = signature(capture())
+                # Completion means the requested pixels are actually visible,
+                # not merely a changed tab index or an old DWM frame.
+                while presented != references[tab] and time.perf_counter() - started < .12:
+                    root.update()
+                    ctypes.windll.dwmapi.DwmFlush()
+                    presented = signature(capture())
                 timings.append((time.perf_counter() - started) * 1000)
+                self.assertEqual(presented, references[tab], "Requested tab did not reach the screen promptly")
             stop.set(); sampler.join(timeout=5)
             self.assertFalse(sampler.is_alive())
             self.assertFalse(errors)
