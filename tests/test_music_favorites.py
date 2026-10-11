@@ -10,6 +10,7 @@ class FavoriteTests(unittest.TestCase):
         w.favorites_view = Mock(); w.favorites_view.get_children.return_value = []
         w.favorites_view.identify_region.return_value = 'cell'
         w.queue_context_id = 'track'
+        w.queue_view = Mock(); w.queue_view.selection.return_value = []
         w.last_music = {'playlist': [{'id': 'track', 'title': 'Song', 'url': 'https://youtu.be/abc'}]}
         return w
 
@@ -41,3 +42,38 @@ class FavoriteTests(unittest.TestCase):
         w.send.assert_called_once_with({'type': 'music_control', 'guild_id': None,
                                         'action': 'remove', 'track_id': 'track'})
         self.assertEqual(w.config, {})
+
+    def test_multi_remove_sends_one_atomic_request(self):
+        w = self.window(); w.refresh_music = Mock()
+        w.queue_view.selection.return_value = ["one", "two"]
+        w.remove_queue_song()
+        w.send.assert_called_once_with({"type": "music_control", "guild_id": None,
+                                       "action": "remove", "track_ids": ["one", "two"]})
+
+    def test_expanded_playlist_tracks_are_individually_playable(self):
+        w = self.window()
+        w.save_music_favorite({"title": "Mix", "url": "https://youtube.com/playlist?list=PL1",
+                               "playlist": True, "tracks": [{"title": "Song", "webpage_url": "https://youtu.be/abc"}]})
+        child = next(key for key in w.favorite_items if ":" in key)
+        w.favorites_view.identify_row.return_value = child
+        w.play_favorite(SimpleNamespace(x=5, y=5))
+        self.assertFalse(w.send.call_args.args[0]["playlist"])
+        self.assertEqual(w.send.call_args.args[0]["url"], "https://youtu.be/abc")
+
+
+class PlaylistBrowseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_browse_loads_metadata_without_playing_or_enqueuing(self):
+        import json
+        from unittest.mock import AsyncMock, patch
+        from relay_agent.main import RelayAgent
+        agent = RelayAgent({})
+        info = {"entries": [{"id": "abc", "title": "Song"}, {"id": "bad", "availability": "private"}]}
+        process = SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(json.dumps(info).encode(), b"")))
+        agent.send_json = AsyncMock()
+        with patch("relay_agent.main.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)) as spawn:
+            await agent.browse_playlist("saved", "https://youtube.com/playlist?list=PL1")
+        event = agent.events.get_nowait()
+        self.assertEqual(event["favorite_playlist"], "saved")
+        self.assertEqual(event["tracks"], [{"title": "Song", "webpage_url": "https://www.youtube.com/watch?v=abc"}])
+        self.assertIn("--playlist-end", spawn.call_args.args)
+        agent.send_json.assert_not_awaited()

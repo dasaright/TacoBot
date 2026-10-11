@@ -119,7 +119,12 @@ volume setting is preserved; Music and TTS initially default to 100%.
 
 The Music toolbar provides Previous, Play/Pause, and Next. Play changes to
 Pause while music is playing, then returns to Play when paused. The current
-song is highlighted in the queue. The Soundboard toolbar provides Stop clips,
+song is highlighted in the queue. Use Ctrl/Shift to select multiple songs, then
+right-click Remove from queue or press Delete to remove the selection together.
+Saved playlists expand with the arrow to show their first 50 available songs;
+double-click a child song to enqueue it individually. Paste full playlist in the
+Music toolbar controls whether pasted playlist-bearing links enqueue up to 50
+songs or just their linked video. This preference is saved. The Soundboard toolbar provides Stop clips,
 Refresh, Sync, Search clips, and Open folder. Soundboard clips play only when
 a file row is clicked; Stop clips preserves music. Clips do not post Now
 playing messages in Discord. The queue refreshes every two seconds. Voice,

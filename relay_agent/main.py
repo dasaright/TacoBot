@@ -592,6 +592,30 @@ class RelayAgent:
         async with self.send_lock:
             await self.websocket.send(payload)
 
+    async def browse_playlist(self, key, url):
+        process = None
+        try:
+            args = youtube_common_args(self.config)
+            args.remove("--no-playlist")
+            args += ["--yes-playlist", "--playlist-end", "50", "--flat-playlist", "--dump-single-json", "--skip-download", url]
+            process = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE, creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=45)
+            if process.returncode:
+                raise RuntimeError(stderr.decode("utf-8", errors="replace"))
+            info = json.loads(stdout)
+            tracks = [{"webpage_url": "https://www.youtube.com/watch?v=" + str(entry["id"]),
+                       "title": str(entry.get("title") or "YouTube song")[:200]}
+                      for entry in info.get("entries", [])[:50] if entry and entry.get("id")
+                      and entry.get("availability") not in {"private", "needs_auth", "subscriber_only", "premium_only"}]
+            self.events.put({"favorite_playlist": key, "tracks": tracks})
+        except Exception as exc:
+            self.events.put({"favorite_playlist": key, "error": clean_error(exc)})
+        finally:
+            if process is not None and process.returncode is None:
+                process.kill()
+                await process.communicate()
+
     async def probe(self, request_id, url, playlist=False):
         args = youtube_common_args(self.config) + [
             "--dump-single-json",
@@ -1243,7 +1267,9 @@ class RelayWindow:
         queue_pane = ttk.Frame(music_split)
         music_split.add(saved_pane, weight=1)
         music_split.add(queue_pane, weight=2)
-        self.favorites_view = ttk.Treeview(saved_pane, columns=("song",), show="headings", selectmode="browse")
+        self.favorites_view = ttk.Treeview(saved_pane, columns=("song",), show="tree headings", selectmode="browse")
+        self.favorites_view.column("#0", width=24, minwidth=24, stretch=False)
+        self.favorites_view.bind("<<TreeviewOpen>>", self.expand_favorite_playlist)
         self.favorites_view.heading("song", text="Favorites / playlists")
         self.favorites_view.column("song", width=270, minwidth=140)
         saved_scroll = ttk.Scrollbar(saved_pane, orient="vertical", command=self.favorites_view.yview)
@@ -1258,7 +1284,7 @@ class RelayWindow:
         self.favorite_menu.add_command(label="Remove saved item", command=self.remove_favorite)
         self.favorite_context_id = None
         self.render_favorites()
-        self.queue_view = ttk.Treeview(queue_pane, columns=("song",), show="headings", selectmode="browse")
+        self.queue_view = ttk.Treeview(queue_pane, columns=("song",), show="headings", selectmode="extended")
         self.queue_view.heading("song", text="Your music queue")
         self.queue_view.bind("<Button-3>", self.song_context_menu)
         self.queue_context_id = None
@@ -1268,14 +1294,16 @@ class RelayWindow:
         self.queue_pressed = None
         self.queue_view.bind("<ButtonPress-1>", self.song_mouse_down)
         self.queue_view.bind("<ButtonRelease-1>", self.song_selected)
+        self.queue_view.bind("<Delete>", lambda event: self.remove_queue_song())
         self.queue_view.column("song", width=400)
         self.queue_view.tag_configure("current", background="#25443f", foreground="#75e4ce", font=("Segoe UI", 10, "bold"))
         queue_scroll = ttk.Scrollbar(queue_pane, orient="vertical", command=self.queue_view.yview)
         self.queue_view.configure(yscrollcommand=queue_scroll.set)
         queue_scroll.pack(side="right", fill="y")
         self.paste_playlist = tk.BooleanVar(value=bool(config.get("paste_playlist", False)))
-        ttk.Checkbutton(queue_pane, text="Check to have links play playlists instead of single song",
-                        variable=self.paste_playlist, command=self.save_paste_setting).pack(side="bottom", anchor="w", pady=8)
+        self.paste_playlist_switch = ttk.Checkbutton(music_controls, text="Paste full playlist",
+                        variable=self.paste_playlist, command=self.save_paste_setting)
+        self.paste_playlist_switch.pack(side="left", padx=12)
         self.queue_view.pack(fill="both", expand=True, padx=(0, 12))
         root.bind("<Control-v>", self.paste_youtube_link)
         root.bind("<Control-V>", self.paste_youtube_link)
@@ -2249,6 +2277,7 @@ class RelayWindow:
         return "break"
 
     def render_favorites(self):
+        opened = {key for key in self.favorites_view.get_children() if self.favorites_view.item(key, "open")}
         self.favorites_view.delete(*self.favorites_view.get_children())
         self.favorite_items = {}
         for item in self.config.get("music_favorites", []):
@@ -2259,7 +2288,28 @@ class RelayWindow:
                 continue
             self.favorite_items[key] = item
             title = ("Playlist: " if item.get("playlist") else "") + item.get("title", item["url"])
-            self.favorites_view.insert("", "end", iid=key, values=(title,))
+            self.favorites_view.insert("", "end", iid=key, values=(title,), open=key in opened)
+            if item.get("playlist"):
+                if "tracks" not in item:
+                    self.favorites_view.insert(key, "end", values=("Expand to load songs…",))
+                else:
+                    for index, track in enumerate(item["tracks"]):
+                        child = f"{key}:{index}"
+                        self.favorite_items[child] = {"url": track["webpage_url"], "title": track["title"], "playlist": False}
+                        self.favorites_view.insert(key, "end", iid=child, values=(track["title"],))
+
+    def expand_favorite_playlist(self, event=None):
+        key = self.favorites_view.focus()
+        item = self.favorite_items.get(key)
+        if not item or not item.get("playlist") or "tracks" in item:
+            return
+        pending = getattr(self, "loading_playlists", set())
+        self.loading_playlists = pending
+        if key in pending:
+            return
+        pending.add(key)
+        self.status.set("Loading playlist songs…")
+        asyncio.run_coroutine_threadsafe(self.agent.browse_playlist(key, item["url"]), self.loop)
 
     def save_music_favorite(self, item):
         favorites = self.config.setdefault("music_favorites", [])
@@ -2284,7 +2334,8 @@ class RelayWindow:
         self.queue_context_id = self.queue_view.identify_row(event.y)
         if not self.queue_context_id:
             return "break"
-        self.queue_view.selection_set(self.queue_context_id)
+        if self.queue_context_id not in self.queue_view.selection():
+            self.queue_view.selection_set(self.queue_context_id)
         try:
             self.queue_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -2292,10 +2343,15 @@ class RelayWindow:
         return "break"
 
     def remove_queue_song(self):
-        if self.queue_context_id:
-            self.send({"type": "music_control", "guild_id": None,
-                       "action": "remove", "track_id": self.queue_context_id})
+        selected = list(self.queue_view.selection())
+        if not selected and self.queue_context_id:
+            selected = [self.queue_context_id]
+        if selected:
+            payload = {"type": "music_control", "guild_id": None, "action": "remove"}
+            payload.update({"track_id": selected[0]} if len(selected) == 1 else {"track_ids": selected})
+            self.send(payload)
             self.refresh_music()
+        return "break"
 
     def play_favorite(self, event):
         if self.favorites_view.identify_region(event.x, event.y) != "cell":
@@ -2311,6 +2367,9 @@ class RelayWindow:
         if self.favorites_view.identify_region(event.x, event.y) != "cell":
             return "break"
         self.favorite_context_id = self.favorites_view.identify_row(event.y)
+        parent = self.favorites_view.parent(self.favorite_context_id) if self.favorite_context_id else ""
+        if parent:
+            self.favorite_context_id = parent
         if self.favorite_context_id:
             self.favorites_view.selection_set(self.favorite_context_id)
             try:
@@ -2346,6 +2405,8 @@ class RelayWindow:
         pressed = self.queue_pressed
         self.queue_pressed = None
         if event.widget is not self.queue_view or self.queue_view.identify_region(event.x, event.y) != "cell":
+            return
+        if getattr(event, "state", 0) & 5 or len(self.queue_view.selection()) > 1:
             return
         track_id = self.queue_view.identify_row(event.y)
         if not track_id or track_id != pressed or not self.last_music or "playlist" not in self.last_music:
@@ -2621,11 +2682,22 @@ class RelayWindow:
                 self.render_clips()
                 asyncio.run_coroutine_threadsafe(self.agent.preload_normalization(dict(files)), self.loop)
                 self.status.set(f"Loaded {len(files)} valid audio files. Preparing clip audio…")
+            if "favorite_playlist" in event:
+                key = event["favorite_playlist"]
+                getattr(self, "loading_playlists", set()).discard(key)
+                if "tracks" in event:
+                    item = self.favorite_items.get(key)
+                    if item:
+                        item["tracks"] = event["tracks"]
+                        self.save()
+                        self.render_favorites()
+                        self.status.set(f"Loaded {len(event['tracks'])} playlist songs.")
             if "music" in event:
                 music = event["music"]
                 self.current_song.set(music.get("current") or "Your next song starts here")
                 if music != self.last_music:
                     self.last_music = music
+                    selected_ids = self.queue_view.selection()
                     self.queue_view.delete(*self.queue_view.get_children())
                     playlist = music.get("playlist")
                     if playlist is not None:
@@ -2637,6 +2709,7 @@ class RelayWindow:
                             self.queue_view.insert("", "end", values=(music["current"],), tags=("current",))
                         for number, title in enumerate(music["queue"], 1):
                             self.queue_view.insert("", "end", values=(f"{number}. {title}",))
+                    self.queue_view.selection_set([key for key in selected_ids if self.queue_view.exists(key)])
                     self.music_status.set("Paused" if music["paused"] else ("Playing" if music["current"] else "No music playing"))
                     self.set_music_playing(bool(music["current"]) and not music["paused"])
                     self.previous_button.configure(state="normal" if music["has_previous"] else "disabled")

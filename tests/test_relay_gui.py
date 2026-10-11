@@ -80,6 +80,7 @@ class SongClickTests(unittest.TestCase):
     def test_song_click_sends_stable_song_id(self):
         window=RelayWindow.__new__(RelayWindow)
         window.queue_view=Mock()
+        window.queue_view.selection.return_value=[]
         window.queue_view.identify_row.return_value='song-id'
         window.queue_view.identify_region.return_value='cell'
         window.queue_pressed='song-id'
@@ -248,7 +249,23 @@ class HeaderDragTests(unittest.TestCase):
             self.assertEqual(len(window.favorites_view.get_children()), 1)
             self.assertEqual(window.queue_menu.entrycget(0, 'label'), 'Favorite')
             self.assertEqual(window.queue_menu.entrycget(1, 'label'), 'Remove from queue')
+            window.save_music_favorite({"url": "https://youtube.com/playlist?list=PL1", "title": "Mix", "playlist": True,
+                "tracks": [{"title": "One", "webpage_url": "https://youtu.be/one"}]})
+            parent = next(key for key, item in window.favorite_items.items() if item.get("playlist"))
+            window.favorites_view.item(parent, open=True); root.update()
+            children = window.favorites_view.get_children(parent)
+            self.assertEqual(len(children), 1)
+            self.assertEqual(window.favorites_view.item(children[0], "values"), ("One",))
+            self.assertEqual(window.queue_view.cget("selectmode"), "extended")
+            self.assertTrue(window.paste_playlist_switch.winfo_viewable())
+            window.queue_view.insert("", "end", iid="one", values=("One",))
+            window.queue_view.insert("", "end", iid="two", values=("Two",))
+            window.queue_view.selection_set(("one", "two"))
+            window.send.reset_mock()
+            window.remove_queue_song()
+            self.assertEqual(window.send.call_args_list[0].args[0]["track_ids"], ["one", "two"])
             window.notebook.select(1); root.update()
+            self.assertFalse(window.paste_playlist_switch.winfo_viewable())
             self.assertTrue(window.listbox.winfo_ismapped())
         finally:
             root.destroy()
