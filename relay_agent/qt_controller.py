@@ -4,16 +4,18 @@ import hashlib
 import shutil
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QBrush
+from PySide6.QtGui import QAction, QColor, QBrush, QPixmap
 from PySide6.QtWidgets import (QApplication, QMenu, QFileDialog, QInputDialog, QMessageBox,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QLineEdit,
     QTreeWidget, QAbstractItemView)
 
 from . import main as engine
 from . import clip_catalog
+from .youtube_thumbnail import youtube_thumbnail
 from .qt_adapters import Value, Control, Text, Root, Tree
 
 
@@ -31,6 +33,7 @@ class Controller(engine.RelayWindow):
         self.paste_playlist = Value(getter=view.playlist_toggle.isChecked)
         self.favorites_view = Tree(view.favorites); self.queue_view = Tree(view.queue)
         self.favorite_context_id = None; self.queue_context_id = None; self.last_music = None
+        self.thumbnail_url = None; self.thumbnail_cache = OrderedDict(); self.thumbnail_loading = set()
         self.sync_running = False; self.editing_clips = set(); self.clip_origins = {}; self.file_ids = []
         self.sort_keys = engine.clip_sort_keys(config.get('clip_sort_keys'))
         self.voice_manager = None; self.tts_text = Text(view.tts); self.translated_text = Text(view.translation)
@@ -338,6 +341,13 @@ class Controller(engine.RelayWindow):
         if self.started: self.poll_updates()
 
     def handle_event(self,event):
+        if 'thumbnail_url' in event:
+            url=event['thumbnail_url']; self.thumbnail_loading.discard(url)
+            pixmap=QPixmap()
+            if event.get('thumbnail_bytes') and pixmap.loadFromData(event['thumbnail_bytes']):
+                self.thumbnail_cache[url]=pixmap
+                while len(self.thumbnail_cache)>24: self.thumbnail_cache.popitem(last=False)
+                if url==self.thumbnail_url: self.show_thumbnail(pixmap)
         if 'relay_name' in event: self.view.setWindowTitle('TacoBot — '+event['relay_name']); self.identity.set(event['relay_name']); self.save()
         if event.get('token_required'):
             token,ok=QInputDialog.getText(self.view,'New token needed','Use !token in Discord, then paste the new token:',QLineEdit.EchoMode.Password)
@@ -398,6 +408,8 @@ class Controller(engine.RelayWindow):
     def render_music(self,music):
         if music==self.last_music: return
         self.last_music=music; self.view.now_playing.setText(music.get('current') or 'Your next song starts here')
+        current=next((song for song in music.get('playlist',[]) if song.get('current')),None)
+        self.update_thumbnail(youtube_thumbnail(current.get('url')) if current and music.get('current') else None)
         ids=self.queue_view.selection(); scroll=self.view.queue.verticalScrollBar().value()
         self.view.queue.setUpdatesEnabled(False)
         try:
@@ -411,6 +423,27 @@ class Controller(engine.RelayWindow):
         from .qt_desktop import icon
         self.view.play.setIcon(icon('pause' if playing else 'play','#10211e'))
         self.view.previous.setEnabled(bool(music.get('has_previous')))
+
+    def show_thumbnail(self,pixmap):
+        self.view.thumbnail.setPixmap(pixmap.scaled(144,81,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)); self.view.thumbnail.show()
+
+    def update_thumbnail(self,url):
+        if url==self.thumbnail_url: return
+        self.thumbnail_url=url; self.view.thumbnail.clear(); self.view.thumbnail.hide()
+        if not url: return
+        if url in self.thumbnail_cache:
+            self.thumbnail_cache.move_to_end(url); self.show_thumbnail(self.thumbnail_cache[url]); return
+        if not self.started or url in self.thumbnail_loading: return
+        self.thumbnail_loading.add(url)
+        def download():
+            data=None
+            try:
+                from .updater import open_url
+                with open_url(url) as response: data=response.read(2*1024*1024+1)
+                if len(data)>2*1024*1024: data=None
+            except Exception: pass
+            self.agent.events.put({'thumbnail_url':url,'thumbnail_bytes':data})
+        threading.Thread(target=download,daemon=True).start()
 
     def close(self):
         self.view.close()

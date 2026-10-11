@@ -148,7 +148,7 @@ class ClipModel(QAbstractTableModel):
         if not index.isValid(): return None
         key, name, volume, shared, label, color = self.rows[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
-            return ['▶  ' + name, volume, shared, label or 'Select'][index.column()]
+            return [name, volume, shared, label or 'Select'][index.column()]
         if role == Qt.ItemDataRole.UserRole:
             return key
         if role == Qt.ItemDataRole.BackgroundRole and index.column() == 3 and color:
@@ -301,7 +301,9 @@ class Desktop(QMainWindow):
         bar.addWidget(button('Next', lambda:self.controller.music_control('next'), 'next'))
         self.playlist_toggle = QCheckBox('Paste full playlist'); self.playlist_toggle.setChecked(self.config.get('paste_playlist',False)); self.playlist_toggle.toggled.connect(lambda value:self.controller.paste_changed(value)); bar.addWidget(self.playlist_toggle)
         self.music_volume = self.volume(bar,'music_volume'); bar.addStretch(); area.addWidget(tools)
-        self.now_playing = QLabel('Your next song starts here'); self.now_playing.setWordWrap(True); self.now_playing.setStyleSheet('font-size:20px; font-weight:600; padding:12px 0;'); area.addWidget(self.now_playing)
+        now = QWidget(); now_row = row(now)
+        self.thumbnail = QLabel(); self.thumbnail.setFixedSize(144,81); self.thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter); self.thumbnail.hide(); now_row.addWidget(self.thumbnail)
+        self.now_playing = QLabel('Your next song starts here'); self.now_playing.setWordWrap(True); self.now_playing.setStyleSheet('font-size:20px; font-weight:600; padding:12px 0;'); now_row.addWidget(self.now_playing,1); area.addWidget(now)
         split = QSplitter(); saved = QWidget(); left = QVBoxLayout(saved); left.setContentsMargins(0,0,0,0)
         self.favorites = MusicTree(self,'favorites'); left.addWidget(self.favorites,1)
         buttons = QWidget(); controls = row(buttons); controls.addWidget(button('Save Playlist Link', lambda:self.controller.save_playlist_link(),'save')); controls.addWidget(button('Add selection to queue',lambda:self.controller.add_favorite_selection(),'arrow')); controls.addStretch(); left.addWidget(buttons)

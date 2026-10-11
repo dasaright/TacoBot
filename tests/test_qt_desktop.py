@@ -53,6 +53,7 @@ class QtDesktopTests(unittest.TestCase):
     def test_clip_click_only_name_and_slider_does_not_play(self):
         w=self.window; w.select_tab(1); self.app.processEvents()
         index=w.clip_model.index(0,0); rect=w.clips.visualRect(index)
+        self.assertEqual(index.data(),w.clip_model.rows[0][1])
         QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=rect.center())
         self.assertEqual(self.controller.send.call_args.args[0]['type'],'local_play')
         self.controller.send.reset_mock()
@@ -102,6 +103,23 @@ class QtDesktopTests(unittest.TestCase):
         self.assertFalse(self.window.windowIcon().pixmap(32,32).isNull())
         with Image.open(asset_path('taco.ico')) as icon:
             self.assertTrue({(16,16),(32,32),(48,48),(256,256)}.issubset(icon.ico.sizes()))
+
+    def test_current_thumbnail_cache_stale_download_and_stop(self):
+        import io
+        from PIL import Image
+        c=self.controller; w=self.window
+        first='https://i.ytimg.com/vi/abcdefghijk/mqdefault.jpg'; second='https://i.ytimg.com/vi/lmnopqrstuv/mqdefault.jpg'
+        image=io.BytesIO(); Image.new('RGB',(320,180),'green').save(image,format='PNG')
+        c.render_music({'current':'First','playlist':[{'id':'one','title':'First','url':'https://youtu.be/abcdefghijk','current':True}]})
+        self.assertTrue(w.thumbnail.isHidden())
+        c.handle_event({'thumbnail_url':first,'thumbnail_bytes':image.getvalue()})
+        self.assertFalse(w.thumbnail.isHidden()); self.assertFalse(w.thumbnail.pixmap().isNull())
+        c.render_music({'current':'Second','playlist':[{'id':'two','title':'Second','url':'https://youtu.be/lmnopqrstuv','current':True}]})
+        c.handle_event({'thumbnail_url':first,'thumbnail_bytes':image.getvalue()})
+        self.assertTrue(w.thumbnail.isHidden()); self.assertEqual(c.thumbnail_url,second)
+        c.render_music({'current':'First','playlist':[{'id':'one','title':'First','url':'https://youtu.be/abcdefghijk','current':True}]})
+        self.assertFalse(w.thumbnail.isHidden())
+        c.render_music({'current':None,'playlist':[]}); self.assertTrue(w.thumbnail.isHidden())
 
     def test_fresh_desktop_scans_portable_folder_metadata(self):
         from relay_agent import clip_catalog, main as engine
