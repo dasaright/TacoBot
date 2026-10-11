@@ -115,6 +115,18 @@ class RetainedTabs(ttk.Frame):
             self._selected = selected
             self.nametowidget(selected).tkraise()
             self.event_generate("<<NotebookTabChanged>>")
+            # Complete Tk paint work in this click handler, rather than waiting
+            # behind polling, mouse events, or the next idle display pass.
+            self.update_idletasks()
+            if sys.platform == "win32":
+                import ctypes
+                # Flush exposed child windows synchronously; Tk canvases and
+                # native controls otherwise appear in separate Windows paints.
+                from ctypes import wintypes
+                redraw = ctypes.windll.user32.RedrawWindow
+                redraw.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
+                redraw.restype = wintypes.BOOL
+                redraw(self.winfo_id(), None, None, 0x001 | 0x080 | 0x100)
         return self._selected
 
 
@@ -1230,6 +1242,7 @@ class RelayWindow:
             button = ttk.Button(tabs_bar, text=text, style="SelectedTab.TButton" if index == 0 else "OtherTab.TButton",
                                 command=lambda i=index: self.notebook.select(i))
             button.pack(side="left", anchor="s", padx=(0, 6))
+            button.bind("<ButtonPress-1>", lambda event, i=index: self.press_tab(i))
             self.tab_buttons.append(button)
         self.tab_toolbars = [ttk.Frame(audio_bar) for _ in range(3)]
         self.toolbar_buttons = []
@@ -1469,7 +1482,9 @@ class RelayWindow:
         ttk.Label(update_bar, textvariable=self.identity, style="Muted.TLabel").pack(side="right", padx=18)
         self.add_tab_volume(self.tab_toolbars[0], "music_volume")
         self.add_tab_volume(self.tab_toolbars[2], "tts_volume")
-        self.tab_toolbars[0].pack(fill="x")
+        for toolbar in self.tab_toolbars:
+            toolbar.place(x=0, y=0, relwidth=1, relheight=1)
+        self.tab_toolbars[0].tkraise()
         add_button_icons(root)
         self.set_music_playing(False)
         root.update_idletasks()
@@ -1687,14 +1702,15 @@ class RelayWindow:
         asyncio.run_coroutine_threadsafe(self.agent.play_text(text, VOICE_OPTIONS[self.tts_voice.get()], self.tts_speaker_options[self.tts_speaker.get()]), self.loop)
         return "break"
 
+    def press_tab(self, index):
+        self.notebook.select(index)
+        return "break"
+
     def update_tabs(self, event=None):
         selected = self.notebook.index(self.notebook.select())
         for index, button in enumerate(self.tab_buttons):
             button.configure(style="SelectedTab.TButton" if index == selected else "OtherTab.TButton")
-        for index, toolbar in enumerate(self.tab_toolbars):
-            toolbar.pack_forget()
-            if index == selected:
-                toolbar.pack(fill="x")
+        self.tab_toolbars[selected].tkraise()
         if selected == 1:
             self.root.after_idle(self.position_clip_widgets)
 

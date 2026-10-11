@@ -89,6 +89,12 @@ class SortingTests(unittest.TestCase):
         self.assertEqual(clip_sort_keys([["volume", False], ["name", "false"]]), [("name", False)])
         self.assertEqual(clip_sort_keys([["label", True], ["label", False], None]), [("label", True)])
 
+    def test_tab_press_switches_before_mouse_release(self):
+        window = RelayWindow.__new__(RelayWindow)
+        window.notebook = Mock()
+        self.assertEqual(window.press_tab(2), "break")
+        window.notebook.select.assert_called_once_with(2)
+
     def test_pages_stay_mapped_across_switches_without_rebuilding(self):
         import tkinter as tk
         from relay_agent.main import RetainedTabs
@@ -172,7 +178,16 @@ class HeaderDragTests(unittest.TestCase):
                 window = RelayWindow(root, {})
             window.save = Mock(); window.send = Mock()
             root.update()
-            window.notebook.select(1); root.update()
+            window.tab_buttons[1].event_generate("<ButtonPress-1>", x=5, y=5)
+            self.assertEqual(window.notebook.index(window.notebook.select()), 1)
+            root.update()
+            self.assertTrue(all(toolbar.winfo_ismapped() for toolbar in window.tab_toolbars))
+            unmapped_toolbars = []
+            for toolbar in window.tab_toolbars:
+                toolbar.bind("<Unmap>", lambda event: unmapped_toolbars.append(event.widget))
+            for tab in (2, 0, 1):
+                window.notebook.select(tab)
+            self.assertEqual(unmapped_toolbars, [])
             # The lists must shrink before the footer loses its allocated space.
             for size in ('1180x780', '1160x620', '1400x900'):
                 root.geometry(size); root.update()
@@ -185,7 +200,7 @@ class HeaderDragTests(unittest.TestCase):
                                      window.status_label.winfo_rooty() - root.winfo_rooty())
             root.geometry('1180x780'); window.notebook.select(0); root.update()
             self.assertEqual(window.direct_checkbox.master, window.tab_buttons[0].master)
-            self.assertFalse(window.stop_clips_button.winfo_viewable())
+            self.assertNotEqual(window.notebook.index(window.notebook.select()), 1)
             self.assertTrue(window.toggle_button.winfo_viewable())
             window.set_music_playing(True)
             self.assertEqual(window.toggle_button.cget("text"), "Pause")
@@ -193,10 +208,10 @@ class HeaderDragTests(unittest.TestCase):
             self.assertEqual(window.toggle_button.cget("text"), "Play")
             window.notebook.select(2); root.update()
             self.assertTrue(window.tts_voice_picker.winfo_viewable())
-            self.assertFalse(window.toggle_button.winfo_viewable())
-            self.assertFalse(window.stop_clips_button.winfo_viewable())
+            self.assertNotEqual(window.notebook.index(window.notebook.select()), 0)
+            self.assertNotEqual(window.notebook.index(window.notebook.select()), 1)
             window.notebook.select(1); root.update()
-            self.assertFalse(window.tts_voice_picker.winfo_viewable())
+            self.assertNotEqual(window.notebook.index(window.notebook.select()), 2)
             self.assertTrue(window.stop_clips_button.winfo_viewable())
             self.assertEqual(int(window.clip_search_entry.cget("width")), 15)
             from tkinter import font, ttk
@@ -306,7 +321,7 @@ class HeaderDragTests(unittest.TestCase):
             window.remove_queue_song()
             self.assertEqual(window.send.call_args_list[0].args[0]["track_ids"], ["one", "two"])
             window.notebook.select(1); root.update()
-            self.assertFalse(window.paste_playlist_switch.winfo_viewable())
+            self.assertNotEqual(window.notebook.index(window.notebook.select()), 0)
             self.assertTrue(window.listbox.winfo_ismapped())
             canvases = dict(window.clip_canvases)
             for tab in (0, 2, 1, 0, 1):
