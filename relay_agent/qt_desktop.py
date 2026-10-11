@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QIcon, QImage, QPixmap, QDrag,
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedLayout, QPushButton, QLabel, QCheckBox, QLineEdit, QSlider, QTableView,
     QStyledItemDelegate, QTreeWidget, QAbstractItemView, QSplitter, QTextEdit,
-    QComboBox, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView)
+    QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView)
 
 from . import main as engine
 
@@ -50,19 +50,20 @@ QSplitter::handle { background:#14171c; width:8px; }
 
 ICONS = {}
 
-def icon(name):
-    if name not in ICONS:
-        image = engine.render_button_icon(name, 32).convert('RGBA')
+def icon(name, color="#52d4ba"):
+    key=(name,color)
+    if key not in ICONS:
+        image = engine.render_button_icon(name, 128, color).convert('RGBA')
         qimage = QImage(image.tobytes(), image.width, image.height, QImage.Format.Format_RGBA8888).copy()
-        ICONS[name] = QIcon(QPixmap.fromImage(qimage))
-    return ICONS[name]
+        ICONS[key] = QIcon(QPixmap.fromImage(qimage))
+    return ICONS[key]
 
 
 def button(text, callback, symbol=None, primary=False):
     widget = QPushButton(text); widget.clicked.connect(callback)
     widget.setProperty('primary', primary)
     if symbol:
-        widget.setIcon(icon(symbol)); widget.setIconSize(QSize(27, 27))
+        widget.setIcon(icon(symbol,"#10211e" if primary else "#52d4ba")); widget.setIconSize(QSize(27, 27))
     return widget
 
 
@@ -257,7 +258,7 @@ class Desktop(QMainWindow):
             page.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             self.pages.addWidget(page)
         self.build_music(); self.build_clips(); self.build_tts(); layout.addWidget(self.page_host, 1)
-        footer = QWidget(); foot = row(footer); self.status = QLabel('Connecting your relay'); foot.addWidget(self.status,1); self.identity = QLabel(config.get('relay_name','Personal relay')); foot.addWidget(self.identity); foot.addWidget(QLabel(f'TacoBot v1.{engine.RELAY_BUILD}')); layout.addWidget(footer)
+        footer = QWidget(); foot = row(footer); self.status = QLabel('Connecting your relay'); self.status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); foot.addWidget(self.status,1); self.identity = QLabel(config.get('relay_name','Personal relay')); foot.addWidget(self.identity); foot.addWidget(QLabel(f'TacoBot v1.{engine.RELAY_BUILD}')); layout.addWidget(footer)
         from .qt_controller import Controller
         self.controller = Controller(self, config, start_agent=start_agent)
         self.select_tab(0)
@@ -287,7 +288,7 @@ class Desktop(QMainWindow):
         bar.addWidget(button('Next', lambda:self.controller.music_control('next'), 'next'))
         self.playlist_toggle = QCheckBox('Paste full playlist'); self.playlist_toggle.setChecked(self.config.get('paste_playlist',False)); self.playlist_toggle.toggled.connect(lambda value:self.controller.paste_changed(value)); bar.addWidget(self.playlist_toggle)
         self.music_volume = self.volume(bar,'music_volume'); bar.addStretch(); area.addWidget(tools)
-        self.now_playing = QLabel('Your next song starts here'); self.now_playing.setStyleSheet('font-size:20px; font-weight:600; padding:12px 0;'); area.addWidget(self.now_playing)
+        self.now_playing = QLabel('Your next song starts here'); self.now_playing.setWordWrap(True); self.now_playing.setStyleSheet('font-size:20px; font-weight:600; padding:12px 0;'); area.addWidget(self.now_playing)
         split = QSplitter(); saved = QWidget(); left = QVBoxLayout(saved); left.setContentsMargins(0,0,0,0)
         self.favorites = MusicTree(self,'favorites'); left.addWidget(self.favorites,1)
         buttons = QWidget(); controls = row(buttons); controls.addWidget(button('Save Playlist Link', lambda:self.controller.save_playlist_link(),'save')); controls.addWidget(button('Add selection to queue',lambda:self.controller.add_favorite_selection(),'arrow')); controls.addStretch(); left.addWidget(buttons)
@@ -301,7 +302,7 @@ class Desktop(QMainWindow):
         tools = QWidget(); bar = row(tools); bar.addWidget(button('Stop clips',lambda:self.controller.stop(),'stop'))
         bar.addWidget(QLabel('Search clips')); self.search = QLineEdit(); self.search.setClearButtonEnabled(True); self.search.setFixedWidth(190); self.search.setPlaceholderText('Name or label'); self.search.textChanged.connect(lambda:self.controller.render_clips()); bar.addWidget(self.search)
         self.clip_volume = self.volume(bar,'bot_clip_volume'); bar.addWidget(button('Refresh',lambda:self.controller.refresh_files(),'refresh')); bar.addWidget(button('Sync',lambda:self.controller.sync_shared(),'sync')); bar.addStretch(); bar.addWidget(button('Open folder',lambda:self.controller.choose_folder(),'folder')); area.addWidget(tools)
-        details = QWidget(); line = row(details); line.addStretch(); line.addWidget(QLabel('Click a clip to play · Right-click to manage')); self.folder = QLabel(self.config.get('mp3_folder','No local folder selected')); line.addWidget(self.folder); area.addWidget(details)
+        details = QWidget(); line = row(details); line.addStretch(); line.addWidget(QLabel('Click a clip to play · Right-click to manage')); self.folder = QLabel(self.config.get('mp3_folder','No local folder selected')); self.folder.setMaximumWidth(400); self.folder.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); line.addWidget(self.folder); area.addWidget(details)
         self.clips = ClipTable(); self.clips.setAcceptDrops(True); self.clips.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
         self.clip_model = ClipModel(self); self.clips.setModel(self.clip_model); self.clips.setItemDelegate(ClipDelegate(self)); self.clips.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.clips.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.clips.setShowGrid(False); self.clips.setAlternatingRowColors(True); self.clips.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel); self.clips.verticalHeader().hide(); self.clips.verticalHeader().setDefaultSectionSize(25); self.clips.verticalHeader().setMinimumSectionSize(25)

@@ -363,7 +363,7 @@ class Controller(engine.RelayWindow):
         finally: self.view.queue.setUpdatesEnabled(True)
         playing=bool(music.get('current')) and not music.get('paused'); self.view.play.setText('Pause' if playing else 'Play')
         from .qt_desktop import icon
-        self.view.play.setIcon(icon('pause' if playing else 'play'))
+        self.view.play.setIcon(icon('pause' if playing else 'play','#10211e'))
         self.view.previous.setEnabled(bool(music.get('has_previous')))
 
     def close(self):

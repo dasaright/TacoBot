@@ -102,6 +102,8 @@ class Tree:
         if 'current' in tags:
             from PySide6.QtGui import QColor, QBrush
             item.setForeground(0, QBrush(QColor('#52d4ba')))
+            item.setBackground(0, QBrush(QColor('#234039')))
+            font=item.font(0); font.setBold(True); item.setFont(0,font)
         return key
 
     def get_children(self, parent=''):
