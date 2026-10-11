@@ -127,3 +127,45 @@ class SelectionQueueTests(unittest.TestCase):
                         "moved": False, "selected_count": 3}
         w.music_drag_motion(SimpleNamespace(x_root=20, y_root=80))
         tree.selection_set.assert_not_called()
+
+    def test_name_tree_area_drag_adds_full_selection_to_queue(self):
+        w = RelayWindow.__new__(RelayWindow); tree = Mock(); queue = Mock()
+        tree.identify_region.return_value = "tree"
+        tree.identify.return_value = "Treeitem.text"
+        tree.identify_row.return_value = "one"
+        tree.selection.return_value = ["one", "two"]
+        tree.parent.return_value = ""
+        tree.winfo_rootx.return_value = tree.winfo_rooty.return_value = 0
+        tree.winfo_width.return_value = tree.winfo_height.return_value = 200
+        queue.winfo_rootx.return_value = 250; queue.winfo_rooty.return_value = 0
+        queue.winfo_width.return_value = queue.winfo_height.return_value = 200
+        w.queue_view = queue; w.favorites_view = tree
+        w.visible_music_rows = Mock(return_value=["one", "two"])
+        w.favorite_items = {"one": {"url": "https://youtu.be/one"}, "two": {"url": "https://youtu.be/two"}}
+        w.status = Mock(); w.send = Mock()
+        self.assertEqual(w.begin_music_drag(tree, SimpleNamespace(x=30, y=30, x_root=30, y_root=30, state=0)), "break")
+        event = SimpleNamespace(widget=tree, x_root=280, y_root=80)
+        w.music_drag_motion(event)
+        w.music_drag_release(event)
+        self.assertEqual(w.send.call_args.args[0]["items"], [
+            {"url": "https://youtu.be/one", "playlist": False},
+            {"url": "https://youtu.be/two", "playlist": False}])
+
+    def test_favorite_context_keeps_selected_children_and_songs(self):
+        w = RelayWindow.__new__(RelayWindow); tree = Mock()
+        tree.identify_region.return_value = "tree"
+        tree.identify_row.return_value = "child"
+        tree.parent.return_value = "playlist"
+        tree.selection.return_value = ["child", "song"]
+        w.favorites_view = tree; w.favorite_menu = Mock()
+        w.favorite_context_menu(SimpleNamespace(x=20, y=40, x_root=20, y_root=40))
+        tree.selection_set.assert_not_called()
+        self.assertEqual(w.favorite_context_id, "playlist")
+        w.favorite_menu.tk_popup.assert_called_once()
+
+    def test_expander_keeps_native_playlist_open_behavior(self):
+        w = RelayWindow.__new__(RelayWindow); tree = Mock()
+        tree.identify_region.return_value = "tree"; tree.identify.return_value = "Treeitem.indicator"
+        w.favorites_view = tree; w.queue_view = Mock()
+        self.assertIsNone(w.begin_music_drag(tree, SimpleNamespace(x=2, y=30)))
+        tree.selection_set.assert_not_called()

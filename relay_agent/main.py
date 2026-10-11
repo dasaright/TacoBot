@@ -1,6 +1,7 @@
 import asyncio
 import math
 from array import array
+from contextlib import contextmanager
 import json
 import re
 from urllib.parse import urlsplit
@@ -78,6 +79,31 @@ def clip_sort_keys(saved):
     return keys or [("name", False)]
 
 
+@contextmanager
+def atomic_window_paint(widget):
+    """Keep the last complete Windows view visible until layout is ready."""
+    if sys.platform != "win32":
+        yield
+        return
+    import ctypes
+    from ctypes import wintypes
+    api = ctypes.windll.user32
+    api.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    api.GetAncestor.restype = wintypes.HWND
+    api.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t]
+    api.SendMessageW.restype = ctypes.c_ssize_t
+    api.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
+    api.RedrawWindow.restype = wintypes.BOOL
+    hwnd = api.GetAncestor(widget.winfo_toplevel().winfo_id(), 2)
+    api.SendMessageW(hwnd, 0x000B, 0, 0)  # WM_SETREDRAW: suspend presentation.
+    try:
+        yield
+        widget.update_idletasks()
+    finally:
+        api.SendMessageW(hwnd, 0x000B, 1, 0)
+        api.RedrawWindow(hwnd, None, None, 0x001 | 0x020 | 0x080 | 0x100)
+
+
 class RetainedTabs(ttk.Frame):
     """Keep pages mapped and laid out; switching only raises the selected page.
 
@@ -112,21 +138,11 @@ class RetainedTabs(ttk.Frame):
             return self._selected
         selected = str(self._pages[self.index(page)])
         if selected != self._selected:
-            self._selected = selected
-            self.nametowidget(selected).tkraise()
-            self.event_generate("<<NotebookTabChanged>>")
-            # Complete Tk paint work in this click handler, rather than waiting
-            # behind polling, mouse events, or the next idle display pass.
-            self.update_idletasks()
-            if sys.platform == "win32":
-                import ctypes
-                # Flush exposed child windows synchronously; Tk canvases and
-                # native controls otherwise appear in separate Windows paints.
-                from ctypes import wintypes
-                redraw = ctypes.windll.user32.RedrawWindow
-                redraw.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
-                redraw.restype = wintypes.BOOL
-                redraw(self.winfo_id(), None, None, 0x001 | 0x080 | 0x100)
+            with atomic_window_paint(self):
+                self._selected = selected
+                self.nametowidget(selected).tkraise()
+                self.event_generate("<<NotebookTabChanged>>")
+                self.update_idletasks()
         return self._selected
 
 
@@ -1364,6 +1380,8 @@ class RelayWindow:
         self.favorites_view.bind("<ButtonRelease-1>", self.music_drag_release)
         self.favorites_view.bind("<Button-3>", self.favorite_context_menu)
         self.favorite_menu = themed_menu(root)
+        self.favorite_menu.add_command(label="Add selection to queue", command=self.add_favorite_selection)
+        self.favorite_menu.add_separator()
         self.favorite_menu.add_command(label="Remove saved item", command=self.remove_favorite)
         self.favorite_context_id = None
         self.render_favorites()
@@ -1703,6 +1721,10 @@ class RelayWindow:
         return "break"
 
     def press_tab(self, index):
+        for state in getattr(self, "scroll_states", {}).values():
+            if state["after"] is not None:
+                self.root.after_cancel(state["after"])
+            state.update(pending=0.0, after=None)
         self.notebook.select(index)
         return "break"
 
@@ -2460,14 +2482,14 @@ class RelayWindow:
         return "break"
 
     def favorite_context_menu(self, event):
-        if self.favorites_view.identify_region(event.x, event.y) != "cell":
+        if self.favorites_view.identify_region(event.x, event.y) not in ("cell", "tree"):
             return "break"
-        self.favorite_context_id = self.favorites_view.identify_row(event.y)
-        parent = self.favorites_view.parent(self.favorite_context_id) if self.favorite_context_id else ""
-        if parent:
-            self.favorite_context_id = parent
-        if self.favorite_context_id:
-            self.favorites_view.selection_set(self.favorite_context_id)
+        row = self.favorites_view.identify_row(event.y)
+        if row:
+            self.music_drag = None
+            if row not in self.favorites_view.selection():
+                self.favorites_view.selection_set(row)
+            self.favorite_context_id = self.favorites_view.parent(row) or row
             try:
                 self.favorite_menu.tk_popup(event.x_root, event.y_root)
             finally:
@@ -2504,7 +2526,9 @@ class RelayWindow:
 
     def begin_music_drag(self, tree, event):
         self.music_drag = None
-        if tree.identify_region(event.x, event.y) != "cell":
+        if tree.identify_region(event.x, event.y) not in ("cell", "tree"):
+            return
+        if tree is self.favorites_view and "indicator" in str(tree.identify("element", event.x, event.y)):
             return
         row = tree.identify_row(event.y)
         if not row:
@@ -2528,7 +2552,7 @@ class RelayWindow:
         if not modifiers & 1:
             self.music_selection_anchors[tree] = row
         self.music_drag = {"tree": tree, "row": row, "x": event.x_root, "y": event.y_root,
-                           "mode": "move" if kept or tree is self.queue_view else "range", "moved": False, "modifiers": modifiers, "selected_count": len(selected)}
+                           "mode": "move" if kept or len(selected) > 1 or tree is self.queue_view else "range", "moved": False, "modifiers": modifiers, "selected_count": len(selected)}
         return "break"
 
     def favorite_mouse_down(self, event):
@@ -2550,9 +2574,9 @@ class RelayWindow:
                 tree.selection_set(rows[start:end + 1])
         else:
             self.status.set("Release over the queue to add or reposition the selection.")
-        if y < 24:
+        if 0 <= x < tree.winfo_width() and y < 24:
             tree.yview_scroll(-1, "units")
-        elif y > tree.winfo_height() - 20:
+        elif 0 <= x < tree.winfo_width() and y > tree.winfo_height() - 20:
             tree.yview_scroll(1, "units")
         return "break"
 
@@ -2796,7 +2820,8 @@ class RelayWindow:
             pass
 
     def poll(self):
-        while not self.agent.events.empty():
+        batch_started = time.monotonic()
+        while not self.agent.events.empty() and time.monotonic() - batch_started < 0.008:
             event = self.agent.events.get_nowait()
             if "direct_ready" in event or "direct_failed" in event:
                 enabled = event.get("direct_ready", False)
@@ -2929,7 +2954,7 @@ class RelayWindow:
             self.next_music_refresh = time.monotonic() + 2
             self.refresh_music()
         if not self.poll_updates():
-            self.root.after(100, self.poll)
+            self.root.after(10 if not self.agent.events.empty() else 100, self.poll)
 
     def save_normalization(self):
         self.normalization_save_after = None
