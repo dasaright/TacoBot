@@ -41,26 +41,36 @@ class PresentationTests(unittest.TestCase):
                 window.select_tab(tab); app.processEvents(); ctypes.windll.dwmapi.DwmFlush()
                 image=capture(); image.save(output/f'tab-{tab}.png'); references.append(signature(image))
             self.assertEqual(len(set(references)),3,'Captured panes must be distinct')
+            # Measure presentation without a GIL-holding screen recorder. Pixel
+            # acquisition is checked afterwards and its overhead is reported
+            # separately; it must not be mistaken for application latency.
+            timings=[]; capture_times=[]; missing=[]
+            for tab in [0,1,2]*20:
+                started=time.perf_counter(); window.tabs[tab].pressed.emit(); app.processEvents(); ctypes.windll.dwmapi.DwmFlush()
+                timings.append((time.perf_counter()-started)*1000)
+                capture_started=time.perf_counter(); shown=signature(capture())
+                capture_times.append((time.perf_counter()-capture_started)*1000)
+                if shown!=references[tab]: missing.append(tab)
             errors=[]
             def observe():
                 while not stop.is_set():
                     try: samples.append(capture())
                     except Exception as exc: errors.append(str(exc)); break
-            sampler=threading.Thread(target=observe,daemon=True); sampler.start(); timings=[]; missing=[]
-            for tab in [0,1,2]*20:
-                started=time.perf_counter(); window.tabs[tab].pressed.emit(); app.processEvents(); ctypes.windll.dwmapi.DwmFlush()
-                shown=signature(capture())
-                while shown!=references[tab] and time.perf_counter()-started<.12:
-                    app.processEvents(); ctypes.windll.dwmapi.DwmFlush(); shown=signature(capture())
-                timings.append((time.perf_counter()-started)*1000)
-                if shown!=references[tab]: missing.append(tab)
+                    stop.wait(.002)
+            sampler=threading.Thread(target=observe,daemon=True); sampler.start()
+            # Independent visual-transition test. Recording cannot skew the
+            # latency benchmark above, but still catches any intermediate frame.
+            from PySide6.QtTest import QTest
+            for tab in [0,1,2]*12:
+                window.tabs[tab].pressed.emit(); app.processEvents(); ctypes.windll.dwmapi.DwmFlush(); QTest.qWait(16)
             stop.set(); sampler.join(timeout=5)
             partial=[image for image in samples if signature(image) not in references]
             for n,image in enumerate(partial[:8]): image.save(output/f'partial-{n}.png')
             p95=sorted(timings)[int(len(timings)*.95)-1]
             report={'toolkit':'Qt 6','clips':1000,'queue_songs':500,'switches':len(timings),
                     'sampled_frames':len(samples),'partial_frames':len(partial),'missing_target_frames':len(missing),
-                    'median_ms':round(statistics.median(timings),2),'p95_ms':round(p95,2),'max_ms':round(max(timings),2)}
+                    'median_ms':round(statistics.median(timings),2),'p95_ms':round(p95,2),'max_ms':round(max(timings),2),
+                    'screen_capture_median_ms':round(statistics.median(capture_times),2)}
             (output/'timing.json').write_text(json.dumps(report,indent=2)); print('Presentation benchmark:',json.dumps(report),flush=True)
             self.assertFalse(sampler.is_alive()); self.assertFalse(errors); self.assertGreater(len(samples),10)
             self.assertFalse(missing,'Requested pixels did not appear promptly')
