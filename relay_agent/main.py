@@ -2458,7 +2458,7 @@ class RelayWindow:
         if not modifiers & 1:
             self.music_selection_anchors[tree] = row
         self.music_drag = {"tree": tree, "row": row, "x": event.x_root, "y": event.y_root,
-                           "mode": "move" if kept or tree is self.queue_view else "range", "moved": False, "modifiers": modifiers}
+                           "mode": "move" if kept or tree is self.queue_view else "range", "moved": False, "modifiers": modifiers, "selected_count": len(selected)}
         return "break"
 
     def favorite_mouse_down(self, event):
@@ -2471,7 +2471,7 @@ class RelayWindow:
         drag["moved"] = True
         tree = drag["tree"]
         x, y = event.x_root - tree.winfo_rootx(), event.y_root - tree.winfo_rooty()
-        range_drag = drag["mode"] == "range" or (tree is self.favorites_view and abs(event.y_root - drag["y"]) > abs(event.x_root - drag["x"]))
+        range_drag = drag["mode"] == "range" or (tree is self.favorites_view and drag.get("selected_count", 1) <= 1 and abs(event.y_root - drag["y"]) > abs(event.x_root - drag["x"]))
         if range_drag and tree is self.favorites_view and 0 <= x < tree.winfo_width() and 0 <= y < tree.winfo_height():
             row = tree.identify_row(y)
             rows = self.visible_music_rows(tree)

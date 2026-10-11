@@ -117,3 +117,13 @@ class SelectionQueueTests(unittest.TestCase):
         w.music_drag = {"tree": tree, "row": "one", "x": 10, "y": 10, "mode": "range", "moved": False}
         w.music_drag_motion(SimpleNamespace(x_root=10, y_root=80))
         tree.selection_set.assert_called_once_with(["one", "two", "three"])
+
+    def test_diagonal_drag_preserves_existing_multi_selection(self):
+        w = RelayWindow.__new__(RelayWindow); tree = Mock()
+        tree.winfo_rootx.return_value = tree.winfo_rooty.return_value = 0
+        tree.winfo_width.return_value = tree.winfo_height.return_value = 200
+        w.queue_view = Mock(); w.favorites_view = tree; w.status = Mock()
+        w.music_drag = {"tree": tree, "row": "one", "x": 10, "y": 10, "mode": "move",
+                        "moved": False, "selected_count": 3}
+        w.music_drag_motion(SimpleNamespace(x_root=20, y_root=80))
+        tree.selection_set.assert_not_called()
