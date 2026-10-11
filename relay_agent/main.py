@@ -2343,6 +2343,7 @@ class RelayWindow:
         return "break"
 
     def remove_queue_song(self):
+        """Remove the complete selection in one bot-side transaction."""
         selected = list(self.queue_view.selection())
         if not selected and self.queue_context_id:
             selected = [self.queue_context_id]

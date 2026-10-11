@@ -256,7 +256,7 @@ class HeaderDragTests(unittest.TestCase):
             children = window.favorites_view.get_children(parent)
             self.assertEqual(len(children), 1)
             self.assertEqual(window.favorites_view.item(children[0], "values"), ("One",))
-            self.assertEqual(window.queue_view.cget("selectmode"), "extended")
+            self.assertEqual(str(window.queue_view.cget("selectmode")), "extended")
             self.assertTrue(window.paste_playlist_switch.winfo_viewable())
             window.queue_view.insert("", "end", iid="one", values=("One",))
             window.queue_view.insert("", "end", iid="two", values=("Two",))
