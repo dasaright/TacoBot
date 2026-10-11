@@ -1,7 +1,6 @@
 import asyncio
 import math
 from array import array
-from contextlib import contextmanager
 import json
 import re
 from urllib.parse import urlsplit
@@ -79,35 +78,6 @@ def clip_sort_keys(saved):
     return keys or [("name", False)]
 
 
-@contextmanager
-def atomic_window_paint(widget):
-    """Keep the last complete Windows view visible until layout is ready."""
-    if sys.platform != "win32":
-        yield
-        return
-    import ctypes
-    from ctypes import wintypes
-    api = ctypes.windll.user32
-    api.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
-    api.GetAncestor.restype = wintypes.HWND
-    api.LockWindowUpdate.argtypes = [wintypes.HWND]
-    api.LockWindowUpdate.restype = wintypes.BOOL
-    api.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
-    api.RedrawWindow.restype = wintypes.BOOL
-    hwnd = api.GetAncestor(widget.winfo_toplevel().winfo_id(), 2)
-    # Unlike WM_SETREDRAW, this holds presentation without changing WS_VISIBLE
-    # or triggering Tk to unmap child controls. Never unlock another app's lock.
-    locked = api.LockWindowUpdate(hwnd)
-    try:
-        yield
-        widget.update_idletasks()
-    finally:
-        if locked:
-            api.LockWindowUpdate(None)
-        api.RedrawWindow(hwnd, None, None, 0x001 | 0x020 | 0x080 | 0x100)
-        widget.update_idletasks()
-
-
 class RetainedTabs(ttk.Frame):
     """Keep pages mapped and laid out; switching only raises the selected page.
 
@@ -142,11 +112,10 @@ class RetainedTabs(ttk.Frame):
             return self._selected
         selected = str(self._pages[self.index(page)])
         if selected != self._selected:
-            with atomic_window_paint(self):
-                self._selected = selected
-                self.nametowidget(selected).tkraise()
-                self.event_generate("<<NotebookTabChanged>>")
-                self.update_idletasks()
+            self._selected = selected
+            self.nametowidget(selected).tkraise()
+            self.event_generate("<<NotebookTabChanged>>")
+            self.update_idletasks()
         return self._selected
 
 
@@ -1222,7 +1191,13 @@ def copy_soundboard_files(paths, folder, ffmpeg_path=FFMPEG_PATH):
 
 def create_root():
     from tkinterdnd2 import TkinterDnD
-    return TkinterDnD.Tk()
+    root = TkinterDnD.Tk()
+    if __package__:
+        from .presentation import enable_buffered_presentation
+    else:
+        from presentation import enable_buffered_presentation
+    enable_buffered_presentation(root)
+    return root
 
 
 class RelayWindow:
