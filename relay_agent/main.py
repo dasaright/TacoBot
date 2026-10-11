@@ -90,18 +90,22 @@ def atomic_window_paint(widget):
     api = ctypes.windll.user32
     api.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
     api.GetAncestor.restype = wintypes.HWND
-    api.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, ctypes.c_size_t, ctypes.c_ssize_t]
-    api.SendMessageW.restype = ctypes.c_ssize_t
+    api.LockWindowUpdate.argtypes = [wintypes.HWND]
+    api.LockWindowUpdate.restype = wintypes.BOOL
     api.RedrawWindow.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.HANDLE, wintypes.UINT]
     api.RedrawWindow.restype = wintypes.BOOL
     hwnd = api.GetAncestor(widget.winfo_toplevel().winfo_id(), 2)
-    api.SendMessageW(hwnd, 0x000B, 0, 0)  # WM_SETREDRAW: suspend presentation.
+    # Unlike WM_SETREDRAW, this holds presentation without changing WS_VISIBLE
+    # or triggering Tk to unmap child controls. Never unlock another app's lock.
+    locked = api.LockWindowUpdate(hwnd)
     try:
         yield
         widget.update_idletasks()
     finally:
-        api.SendMessageW(hwnd, 0x000B, 1, 0)
+        if locked:
+            api.LockWindowUpdate(None)
         api.RedrawWindow(hwnd, None, None, 0x001 | 0x020 | 0x080 | 0x100)
+        widget.update_idletasks()
 
 
 class RetainedTabs(ttk.Frame):
