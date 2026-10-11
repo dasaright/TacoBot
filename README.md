@@ -109,13 +109,21 @@ existing relay-config.json when replacing the program.
 
 ## Desktop controls
 
-Select your connected Discord destination at the top. The left panel shows
-YouTube music and the queue, with the current song highlighted. Pause/Play
-controls music only. Next advances the queue; Previous returns to the most
-recently played song and puts the interrupted song at the front of the queue.
-The right panel plays soundboard clips only when a file row is clicked.
-Stop all clips stops every active clip while preserving music. Clips do not
-post Now playing messages in Discord. The queue refreshes every two seconds.
+Music, Soundboard, and TTS have separate tabs and toolbars. Audio routing,
+Direct playback, automatic updates, and update/install controls stay on the
+right beside the tabs. Each tab has an independent, saved 0–100% volume slider;
+changes apply immediately to that relay's audio, including an active stream.
+All bot playback also passes through the bot's 55% baseline. Individual clip
+adjustments still multiply the Soundboard slider. Your existing Soundboard
+volume setting is preserved; Music and TTS initially default to 100%.
+
+The Music toolbar provides Previous, Play/Pause, and Next. Play changes to
+Pause while music is playing, then returns to Play when paused. The current
+song is highlighted in the queue. The Soundboard toolbar provides Stop clips,
+Refresh, Sync, Search clips, and Open folder. Soundboard clips play only when
+a file row is clicked; Stop clips preserves music. Clips do not post Now
+playing messages in Discord. The queue refreshes every two seconds. Voice,
+Speaker, and Manage voices appear in the TTS toolbar.
 
 Music uses a half-second jitter buffer and absolute 20 ms frame deadlines
 to avoid accumulating Windows scheduling delays. Soundboard clips remain

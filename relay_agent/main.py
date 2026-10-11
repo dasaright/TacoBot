@@ -176,6 +176,9 @@ def render_button_icon(name, size=28, color="#52d4ba"):
         line([(3,9),(7,9),(12,5),(12,19),(7,15),(3,15),(3,9)])
         arc((9,5,21,19),300,60)
         arc((12,8,18,16),300,60)
+    elif name == "pause":
+        line([(8,5),(8,19)])
+        line([(16,5),(16,19)])
     elif name == "previous":
         line([(18,5),(7,12),(18,19),(18,5)])
         line([(4,5),(4,19)])
@@ -720,6 +723,15 @@ class RelayAgent:
         finally:
             self.preload_path = None
 
+    def apply_stream_volume(self, frame, url):
+        file_id = url.removeprefix("local:")
+        if not url.startswith("local:"):
+            return clip_gain(frame, 0, self.config.get("music_volume", 100))
+        if file_id.startswith("tts:"):
+            return clip_gain(frame, 0, self.config.get("tts_volume", 100))
+        adjustment = self.config.get("clip_settings", {}).get(file_id, {}).get("volume", 0)
+        return clip_gain(frame, adjustment, self.config.get("bot_clip_volume", 100))
+
     async def stream(self, request_id, url):
         ytdlp = None
         ffmpeg = None
@@ -794,8 +806,7 @@ class RelayAgent:
                         if local_path is None:
                             await self.playback_gate.wait()
                         frame = exc.partial + bytes(PCM_FRAME_BYTES - len(exc.partial))
-                        if local_path is not None:
-                            frame = clip_gain(frame, self.config.get("clip_settings", {}).get(url.removeprefix("local:"), {}).get("volume", 0), self.config.get("bot_clip_volume", 100))
+                        frame = self.apply_stream_volume(frame, url)
                         await self.send_binary(request_id.encode("ascii") + frame)
                     break
                 if local_path is None:
@@ -808,8 +819,7 @@ class RelayAgent:
                 # Bound catch-up after a stalled download so buffers cannot flood.
                 next_frame_at = max(next_frame_at, now - 0.02)
                 await asyncio.sleep(max(0, next_frame_at - now))
-                if local_path is not None:
-                    frame = clip_gain(frame, self.config.get("clip_settings", {}).get(url.removeprefix("local:"), {}).get("volume", 0), self.config.get("bot_clip_volume", 100))
+                frame = self.apply_stream_volume(frame, url)
                 await self.send_binary(request_id.encode("ascii") + frame)
                 next_frame_at += 0.02
             if pump_task is not None:
@@ -1134,24 +1144,25 @@ class RelayWindow:
                                 command=lambda i=index: self.notebook.select(i))
             button.pack(side="left", anchor="s", padx=(0, 6))
             self.tab_buttons.append(button)
+        self.tab_toolbars = [ttk.Frame(audio_bar) for _ in range(3)]
         self.toolbar_buttons = []
-        button = ttk.Button(audio_bar, text="Open folder", style="Compact.TButton", command=self.choose_folder)
+        button = ttk.Button(self.tab_toolbars[1], text="Open folder", style="Compact.TButton", command=self.choose_folder)
         button.pack(side="right", anchor="center", padx=(6, 0))
         self.toolbar_buttons.append(button)
-        self.install_button = ttk.Button(audio_bar, text="Install", style="Compact.TButton", command=self.install_update_now, state="disabled")
+        self.install_button = ttk.Button(tabs_bar, text="Install", style="Compact.TButton", command=self.install_update_now, state="disabled")
         self.install_button.pack(side="right", anchor="center", padx=(6, 0))
-        self.update_button = ttk.Button(audio_bar, text="Check updates", style="Compact.TButton", command=lambda: self.check_updates(manual=True))
+        self.update_button = ttk.Button(tabs_bar, text="Check updates", style="Compact.TButton", command=lambda: self.check_updates(manual=True))
         self.update_button.pack(side="right", anchor="center", padx=(6, 0))
         self.auto_update = tk.BooleanVar(value=bool(config.get("auto_update", True)))
-        self.auto_update_checkbox = ttk.Checkbutton(audio_bar, text="Auto-update", variable=self.auto_update,
+        self.auto_update_checkbox = ttk.Checkbutton(tabs_bar, text="Auto-update", variable=self.auto_update,
                                                     command=self.toggle_auto_update)
         self.auto_update_checkbox.pack(side="right", anchor="center", padx=(6, 0))
         self.direct_mode = tk.BooleanVar(value=False)
-        self.direct_checkbox = ttk.Checkbutton(audio_bar,
+        self.direct_checkbox = ttk.Checkbutton(tabs_bar,
             text="Direct", variable=self.direct_mode,
             command=self.toggle_direct_mode)
         self.direct_checkbox.pack(side="right", anchor="center", padx=(6, 0))
-        ttk.Button(audio_bar, text="Audio ▾", style="Compact.TButton", command=self.direct_audio_settings).pack(side="right", anchor="center", padx=(6, 0))
+        ttk.Button(tabs_bar, text="Audio ▾", style="Compact.TButton", command=self.direct_audio_settings).pack(side="right", anchor="center", padx=(6, 0))
         left, right = ttk.Frame(self.notebook, padding=(0, 18)), ttk.Frame(self.notebook, padding=0)
         self.notebook.add(left, text="YouTube Music")
         self.notebook.add(right, text="Soundboard")
@@ -1159,8 +1170,8 @@ class RelayWindow:
         self.notebook.add(tts_panel, text="TTS")
         ttk.Label(tts_panel, text="TEXT TO SPEECH", style="CardMuted.TLabel").pack(anchor="w")
         ttk.Label(tts_panel, text="Type text and press Enter to speak through the bot. Shift+Enter adds a new line.").pack(anchor="w", pady=(10, 14))
-        voice_row = ttk.Frame(tts_panel)
-        voice_row.pack(fill="x", pady=(0, 14))
+        voice_row = self.tab_toolbars[2]
+
         ttk.Label(voice_row, text="Voice").pack(side="left", padx=(0, 10))
         chosen_voice = config.get("tts_voice", VOICE)
         if "tts_enabled_voices" not in config:
@@ -1169,7 +1180,7 @@ class RelayWindow:
 
         self.tts_voice = tk.StringVar(value=next((label for label, voice in enabled_options.items() if voice == chosen_voice), next(iter(enabled_options), "")))
         self.tts_voice_picker = ttk.Combobox(voice_row, textvariable=self.tts_voice,
-                                           values=list(enabled_options), state="readonly", width=45)
+                                           values=list(enabled_options), state="readonly", width=35)
         self.tts_voice_picker.pack(side="left")
         self.tts_voice_picker.bind("<<ComboboxSelected>>", self.save_tts_voice)
         ttk.Label(voice_row, text="Speaker").pack(side="left", padx=(16, 8))
@@ -1217,11 +1228,10 @@ class RelayWindow:
         ttk.Label(now_card, text="NOW PLAYING", style="CardMuted.TLabel").pack(anchor="w")
         self.current_song = tk.StringVar(value="Your next song starts here")
         ttk.Label(now_card, textvariable=self.current_song, style="Song.TLabel", wraplength=850).pack(anchor="w", pady=(8, 4))
-        music_controls = ttk.Frame(now_card, style="Card.TFrame")
-        music_controls.pack(fill="x", pady=8)
+        music_controls = self.tab_toolbars[0]
         self.previous_button = ttk.Button(music_controls, text="Previous", command=lambda: self.music_control("previous"))
         self.previous_button.pack(side="left")
-        self.toggle_button = ttk.Button(music_controls, text="Pause / Play", style="Primary.TButton", command=lambda: self.music_control("toggle"))
+        self.toggle_button = ttk.Button(music_controls, text="Play", style="Primary.TButton", command=lambda: self.music_control("toggle"))
         self.toggle_button.pack(side="left", padx=8)
         ttk.Button(music_controls, text="Next", command=lambda: self.music_control("next")).pack(side="left")
         self.music_status = tk.StringVar(value="No music playing")
@@ -1268,10 +1278,10 @@ class RelayWindow:
         self.queue_view.pack(fill="both", expand=True, padx=(0, 12))
         root.bind("<Control-v>", self.paste_youtube_link)
         root.bind("<Control-V>", self.paste_youtube_link)
-        search_bar = ttk.Frame(audio_bar)
+        search_bar = ttk.Frame(self.tab_toolbars[1])
         search_bar.pack(side="left", anchor="center")
         # Stop stays beside search; library and audio settings share the top toolbar.
-        self.stop_clips_button = ttk.Button(audio_bar, text="■  Stop clips", style="Compact.TButton", command=self.stop)
+        self.stop_clips_button = ttk.Button(self.tab_toolbars[1], text="■  Stop clips", style="Compact.TButton", command=self.stop)
         self.stop_clips_button.pack(side="left", anchor="center", padx=(0, 6), before=search_bar)
         ttk.Label(search_bar, text="Search clips", style="Toolbar.TLabel").pack(side="left", padx=(0, 6))
         self.clip_search = tk.StringVar(value="")
@@ -1284,14 +1294,14 @@ class RelayWindow:
         self.clear_search_button.graphite_icon = clear_icon
         self.clear_search_button.bind("<Button-1>", self.clear_clip_search)
         self.clip_search.trace_add("write", self.update_clip_search)
-        ttk.Label(search_bar, text="Bot volume", style="Toolbar.TLabel").pack(side="left", padx=(12, 4))
+        ttk.Label(search_bar, text="Volume", style="Toolbar.TLabel").pack(side="left", padx=(12, 4))
         self.bot_clip_volume = tk.DoubleVar(value=max(0, min(100, config.get("bot_clip_volume", 100))))
         self.bot_volume_text = tk.StringVar(value=f"{round(self.bot_clip_volume.get())}%")
         SleekScale(search_bar, variable=self.bot_clip_volume, command=self.set_bot_clip_volume, width=100).pack(side="left", padx=(6, 4))
         self.bot_volume_label = ttk.Label(search_bar, textvariable=self.bot_volume_text, width=6, anchor="w", style="Muted.TLabel")
         self.bot_volume_label.pack(side="left", padx=(0, 6))
-        details = ttk.Frame(tabs_bar)
-        details.pack(side="right", anchor="center")
+        details = ttk.Frame(right)
+        details.pack(fill="x", pady=(4, 8))
         ttk.Label(details, text="Click a clip to play • Right-click to manage", anchor="e", style="Muted.TLabel").pack(side="left", padx=(12, 18))
         self.folder_label = ttk.Label(details, textvariable=self.folder, width=30, anchor="e", style="Muted.TLabel")
         self.folder_label.pack(side="left")
@@ -1350,15 +1360,19 @@ class RelayWindow:
         # Reserve the footer before the expanding notebook consumes the window.
         update_bar.pack(side="bottom", fill="x", padx=28, pady=(4, 12), before=self.notebook)
         self.status_label.pack(in_=update_bar, side="left", fill="x", expand=True, padx=(0, 12))
-        self.sync_button = ttk.Button(audio_bar, text="⇄  Sync", style="Compact.TButton", command=self.sync_shared)
+        self.sync_button = ttk.Button(self.tab_toolbars[1], text="⇄  Sync", style="Compact.TButton", command=self.sync_shared)
         self.sync_button.pack(side="left", anchor="center", padx=(0, 6), before=search_bar)
-        self.refresh_button = ttk.Button(audio_bar, text="↻  Refresh", style="Compact.TButton", command=self.refresh_files)
+        self.refresh_button = ttk.Button(self.tab_toolbars[1], text="↻  Refresh", style="Compact.TButton", command=self.refresh_files)
         self.refresh_button.pack(side="left", anchor="center", padx=(0, 6), before=self.sync_button)
         # Toolbar and search retain the same command handlers as the previous layout.
         self.clip_action_buttons = [self.refresh_button, self.stop_clips_button, self.sync_button]
         ttk.Label(update_bar, text=f"TacoBot v1.{RELAY_BUILD}", style="Muted.TLabel").pack(side="right")
         ttk.Label(update_bar, textvariable=self.identity, style="Muted.TLabel").pack(side="right", padx=18)
+        self.add_tab_volume(self.tab_toolbars[0], "music_volume")
+        self.add_tab_volume(self.tab_toolbars[2], "tts_volume")
+        self.tab_toolbars[0].pack(fill="x")
         add_button_icons(root)
+        self.set_music_playing(False)
         root.update_idletasks()
         root.minsize(max(1160, max(audio_bar.winfo_reqwidth(), tabs_bar.winfo_reqwidth()) + 56), 620)
         self.update_check_running = False
@@ -1577,6 +1591,10 @@ class RelayWindow:
         selected = self.notebook.index(self.notebook.select())
         for index, button in enumerate(self.tab_buttons):
             button.configure(style="SelectedTab.TButton" if index == selected else "OtherTab.TButton")
+        for index, toolbar in enumerate(self.tab_toolbars):
+            toolbar.pack_forget()
+            if index == selected:
+                toolbar.pack(fill="x")
         self.root.after_idle(self.settle_clip_tab_layout)
 
     def settle_clip_tab_layout(self):
@@ -1804,6 +1822,13 @@ class RelayWindow:
     def refresh_music(self):
         self.send({"type": "music_state", "guild_id": None})
 
+    def set_music_playing(self, playing):
+        name = "pause" if playing else "play"
+        if not hasattr(self, "music_button_images"):
+            size = max(28, round(28 * float(self.root.tk.call("tk", "scaling")) / (96/72)))
+            self.music_button_images = {key: ImageTk.PhotoImage(render_button_icon(key, size, "#10211e"), master=self.root) for key in ("play", "pause")}
+        self.toggle_button.configure(text="Pause" if playing else "Play", image=self.music_button_images[name])
+
     def music_control(self, action):
         self.send({"type": "music_control", "guild_id": None, "action": action})
         self.refresh_music()
@@ -1937,6 +1962,23 @@ class RelayWindow:
 
     def clip_setting(self, key):
         return self.config.setdefault("clip_settings", {}).setdefault(key, {})
+
+    def add_tab_volume(self, toolbar, key):
+        ttk.Label(toolbar, text="Volume", style="Toolbar.TLabel").pack(side="left", padx=(16, 4))
+        variable = tk.DoubleVar(value=max(0, min(100, self.config.get(key, 100))))
+        text = tk.StringVar(value=f"{round(variable.get())}%")
+        def changed(value):
+            self.config[key] = round(float(value))
+            text.set(f"{self.config[key]}%")
+            pending = getattr(self, "volume_save_after", None)
+            if pending:
+                self.root.after_cancel(pending)
+            self.volume_save_after = self.root.after(300, self.save_volume)
+        scale = SleekScale(toolbar, variable=variable, command=changed, width=100)
+        scale.pack(side="left", padx=6)
+        ttk.Label(toolbar, textvariable=text, width=6, style="Muted.TLabel").pack(side="left")
+        setattr(self, key + "_variable", variable)
+        setattr(self, key + "_text", text)
 
     def set_bot_clip_volume(self, value):
         volume = round(float(value))
@@ -2595,7 +2637,7 @@ class RelayWindow:
                         for number, title in enumerate(music["queue"], 1):
                             self.queue_view.insert("", "end", values=(f"{number}. {title}",))
                     self.music_status.set("Paused" if music["paused"] else ("Playing" if music["current"] else "No music playing"))
-                    self.toggle_button.configure(text="Play" if music["paused"] or not music["current"] else "Pause")
+                    self.set_music_playing(bool(music["current"]) and not music["paused"])
                     self.previous_button.configure(state="normal" if music["has_previous"] else "disabled")
             self.status.set(event.get("error") or event.get("status") or self.status.get())
         if time.monotonic() >= self.next_music_refresh:
