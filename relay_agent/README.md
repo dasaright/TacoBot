@@ -237,3 +237,23 @@ Argos models/source: https://github.com/argosopentech/argos-translate and https:
 **Manage voices** lists every available model, whether it is downloaded, whether it is enabled in your TTS selector, and its speaker count. Search/filter the list, select one or more models, and choose **Download & enable**, **Enable**, **Disable**, or **Remove download**. **Use selected** chooses the selected model. Disabling keeps its download on disk; removing a download also disables it. Enabling a model without downloading lets it download on first playback. Your enabled list is saved across restarts.
 
 In the TTS input, **Ctrl+Backspace** deletes the previous word (or selection), and **Shift+Backspace** clears the input.
+
+## Qt desktop presentation
+
+The packaged application now starts from `relay_agent/desktop.py`. Qt owns one
+shared backing store for the desktop, and Music, Soundboard, and TTS are resident
+pages in a `StackAll` layout. Switching pages raises the prepared page without
+constructing widgets, scanning clips, resetting models, or running a transition.
+Soundboard rows use a cached data model and one native paint delegate rather than
+individual slider/label child windows. The asyncio audio/network engine still
+runs separately from the desktop event loop.
+
+Existing `relay-config.json`, tokens, clip labels, per-clip volume, folders,
+favorites/playlists, direct audio devices, independent tab volumes, sorting,
+and auto-update preferences carry forward. No new setup is required.
+
+Windows release tests capture actual visible frames with 1,000 clips and 500
+queue songs. They reject mixed/blank frames and require the requested pixels to
+reach the screen with a 95th-percentile latency below 50 ms. Diagnostics include
+reference screenshots and `timing.json`; these tests measure presentation rather
+than only checking the selected tab index.
