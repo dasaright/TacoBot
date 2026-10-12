@@ -149,6 +149,7 @@ class Controller(engine.RelayWindow):
         apply.clicked.connect(commit); dialog.exec()
 
     def render_clips(self):
+        self.view.editor.set_files(self.agent.local_files,self.clip_origins)
         ids=engine.sorted_clip_ids(self.agent.local_files,self.clip_origins,self.config.get('clip_settings',{}),self.sort_keys)
         query=self.view.search.text().strip().casefold(); settings=self.config.get('clip_settings',{}); colors=self.config.get('clip_labels',{})
         self.file_ids=[key for key in ids if not query or query in self.agent.local_files[key].stem.casefold() or query in settings.get(key,{}).get('label','').casefold()]
@@ -189,10 +190,11 @@ class Controller(engine.RelayWindow):
 
     def poll_updates(self):
         # Neither a manual install nor auto-update may interrupt capture/encoding.
-        if self.recorder.busy or self.playback_recorder.saving or self.editing_clips: return
+        if self.recorder.busy or self.playback_recorder.saving or self.editing_clips or self.view.editor.busy: return
         return super().poll_updates()
 
     def lookback_changed(self,enabled):
+        self.view.playback_status.setText('Starting speaker capture…' if enabled else 'Lookback is off')
         self.config['playback_lookback']=enabled; self.save(); self.view.save_playback.setEnabled(False)
         try:
             if enabled:
@@ -210,8 +212,28 @@ class Controller(engine.RelayWindow):
         if not self.folder.get(): self.choose_folder()
         if not self.folder.get(): return
         try:
-            self.playback_recorder.save(self.folder.get()); self.view.save_playback.setEnabled(False)
-        except Exception as exc: self.status.set(str(exc))
+            self.playback_recorder.save(self.folder.get()); self.view.save_playback.setEnabled(False); self.view.playback_status.setText('Saving the latest playback audio…')
+        except Exception as exc: self.status.set(str(exc)); self.view.playback_status.setText(str(exc))
+
+    def release_editor_source(self,key,path):
+        key=key or hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()
+        async def release():
+            await self.agent.stop_direct_clips(key)
+            if self.agent.preload_path==path and self.agent.preload_task:
+                self.agent.preload_task.cancel(); await asyncio.gather(self.agent.preload_task,return_exceptions=True)
+            tasks=[task for request,task in list(self.agent.clip_tasks.items()) if self.agent.clip_file_ids.get(request)==key]
+            for task in tasks: task.cancel()
+            if tasks: await asyncio.gather(*tasks,return_exceptions=True)
+        if self.started: asyncio.run_coroutine_threadsafe(release(),self.loop).result(timeout=15)
+
+    def editor_saved(self,event):
+        source_key=event.get('source_key') or hashlib.sha256(str(Path(event['source']).resolve()).encode()).hexdigest()
+        path=Path(event['saved']); key=hashlib.sha256(str(path.resolve()).encode()).hexdigest()
+        self.config.setdefault('clip_settings',{})[key]=dict(self.config.get('clip_settings',{}).get(source_key,{}))
+        self.agent.normalization_cache.pop(key,None); self.config.get('clip_normalization',{}).pop(key,None)
+        try: clip_catalog.save_folders({key:path},self.config); self.save()
+        except (OSError,ValueError) as exc: self.status.set('Audio saved; metadata could not be saved: '+str(exc))
+        self.refresh_files()
 
     def import_files(self,paths):
         if not self.folder.get():
@@ -402,6 +424,11 @@ class Controller(engine.RelayWindow):
             self.next_music_refresh=time.monotonic()+2
             if self.agent.websocket: self.refresh_music()
         if self.started: self.poll_updates()
+        if self.playback_recorder.active and not self.playback_recorder.saving:
+            if getattr(self,'last_buffer_feedback',0)<time.monotonic():
+                self.last_buffer_feedback=time.monotonic()+1
+                seconds=self.playback_recorder.buffer.available_seconds()
+                self.view.playback_status.setText(f'Actively recording · {seconds:.1f} / {self.view.lookback_seconds.value()} seconds buffered')
 
     def handle_event(self,event):
         if 'lookback_state' in event:
@@ -410,6 +437,7 @@ class Controller(engine.RelayWindow):
         if event.get('lookback_error'):
             self.view.lookback.blockSignals(True); self.view.lookback.setChecked(False); self.view.lookback.blockSignals(False)
             self.config['playback_lookback']=False; self.save(); self.status.set('Playback lookback: '+event['lookback_error']); self.view.save_playback.setEnabled(False)
+            self.view.playback_status.setText('Capture failed: '+event['lookback_error'])
         if event.get('playback_saved'):
             self.view.save_playback.setEnabled(self.view.lookback.isChecked() and self.playback_recorder.active)
             if self.close_after_recording: QTimer.singleShot(0,self.view.close)
@@ -428,7 +456,9 @@ class Controller(engine.RelayWindow):
             if state=='recording': self.status.set('Recording speaker output: '+event.get('recording_device',''))
             if state=='saving': self.status.set('Saving recording…')
             if state=='idle' and self.close_after_recording: QTimer.singleShot(0,self.view.close)
-        if event.get('recording_error'): self.status.set('Could not record: '+event['recording_error'])
+        if event.get('recording_error'):
+            self.status.set('Could not record: '+event['recording_error']); self.view.playback_status.setText('Save failed: '+event['recording_error'])
+            self.last_buffer_feedback=time.monotonic()+15
         if event.get('recorded_clip'):
             path=Path(event['recorded_clip']); key=hashlib.sha256(str(path.resolve()).encode()).hexdigest()
             self.config.setdefault('clip_labels',{}).setdefault('Recording',engine.LABEL_COLORS['Light Blue'])
@@ -437,6 +467,7 @@ class Controller(engine.RelayWindow):
                 clip_catalog.save_folders({key:path},self.config); self.save()
             except (OSError,ValueError) as exc: self.status.set('Recording saved, but its label could not be saved: '+str(exc))
             else: self.status.set('Saved '+path.name)
+            self.view.playback_status.setText('Saved: '+str(path)); self.view.playback_status.setToolTip(str(path)); self.last_buffer_feedback=time.monotonic()+8
             if self.folder.get() and event.get('recording_folder') and Path(event['recording_folder']).resolve()==Path(self.folder.get()).resolve(): self.refresh_files()
         if 'thumbnail_url' in event:
             url=event['thumbnail_url']; self.thumbnail_loading.discard(url)

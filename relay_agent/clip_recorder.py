@@ -8,6 +8,30 @@ import threading
 import wave
 
 
+def capture_speakers(consume,stop_event,prepare,ready):
+    """One native capture implementation for Record and continuous lookback."""
+    import pyaudiowpatch as audio
+    errors=[]
+    with audio.PyAudio() as manager:
+        device=manager.get_default_wasapi_loopback()
+        channels,rate=int(device['maxInputChannels']),int(device['defaultSampleRate'])
+        if channels<1 or rate<1: raise RuntimeError('Default playback device does not support recording.')
+        prepare(rate,channels)
+        def callback(data,count,timing,status):
+            try: consume(data); return (None,audio.paContinue)
+            except Exception as exc: errors.append(exc); stop_event.set(); return (None,audio.paAbort)
+        stream=manager.open(format=audio.paInt16,channels=channels,rate=rate,input=True,
+            input_device_index=device['index'],frames_per_buffer=1024,stream_callback=callback)
+        try:
+            ready(device)
+            while not stop_event.wait(.1):
+                if not stream.is_active(): raise RuntimeError('Speaker capture stopped. Check your playback device.')
+        finally:
+            try: stream.stop_stream()
+            finally: stream.close()
+        if errors: raise errors[0]
+
+
 def reserve_clip(folder, prefix='clipped soundboard', parentheses=True):
     folder = Path(folder)
     if not folder.is_dir():
@@ -72,38 +96,13 @@ class ClipRecorder:
     def _record(self, folder):
         temporary = None
         try:
-            import pyaudiowpatch as audio
             fd, temporary = tempfile.mkstemp(prefix='TacoBot-record-', suffix='.wav')
             os.close(fd)
-            callback_errors = []
-            with audio.PyAudio() as manager:
-                device = manager.get_default_wasapi_loopback()
-                channels, rate = int(device['maxInputChannels']), int(device['defaultSampleRate'])
-                if channels < 1 or rate < 1:
-                    raise RuntimeError('The default playback device does not support recording.')
-                with wave.open(temporary, 'wb') as output:
-                    output.setnchannels(channels); output.setsampwidth(2); output.setframerate(rate)
-                    def capture(data, count, timing, status):
-                        try:
-                            output.writeframesraw(data)
-                            return (None, audio.paContinue)
-                        except Exception as exc:
-                            callback_errors.append(exc); self.stop_event.set()
-                            return (None, audio.paAbort)
-                    stream = manager.open(format=audio.paInt16, channels=channels, rate=rate,
-                        input=True, input_device_index=device['index'], frames_per_buffer=1024,
-                        stream_callback=capture)
-                    try:
-                        self.events.put({'recorder_state': 'recording', 'recording_device': device['name']})
-                        while not self.stop_event.wait(.1):
-                            if not stream.is_active():
-                                raise RuntimeError('Speaker capture stopped. Check your playback device.')
-                    finally:
-                        try: stream.stop_stream()
-                        finally: stream.close()
-                    if callback_errors:
-                        raise callback_errors[0]
-                    frames = output.getnframes()
+            with wave.open(temporary,'wb') as output:
+                def prepare(rate,channels): output.setnchannels(channels); output.setsampwidth(2); output.setframerate(rate)
+                capture_speakers(output.writeframesraw,self.stop_event,prepare,
+                    lambda device:self.events.put({'recorder_state':'recording','recording_device':device['name']}))
+                frames=output.getnframes()
             if frames == 0:
                 raise RuntimeError('No speaker audio was captured. Play audio before recording.')
             self.events.put({'recorder_state': 'saving'})

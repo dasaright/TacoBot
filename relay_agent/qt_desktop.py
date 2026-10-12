@@ -54,6 +54,8 @@ ICONS = {}
 def icon(name, color="#52d4ba"):
     key=(name,color)
     if key not in ICONS:
+        if name=='edit':
+            pixmap=QPixmap(128,128); pixmap.fill(Qt.GlobalColor.transparent); painter=QPainter(pixmap); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.setPen(QPen(QColor(color),7)); painter.drawLine(36,14,36,92); painter.drawLine(36,92,114,92); painter.drawLine(14,36,92,36); painter.drawLine(92,36,92,114); painter.end(); ICONS[key]=QIcon(pixmap); return ICONS[key]
         if name == 'record':
             pixmap=QPixmap(128,128); pixmap.fill(Qt.GlobalColor.transparent); painter=QPainter(pixmap); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor('#f27676')); painter.drawEllipse(24,24,80,80); painter.end(); ICONS[key]=QIcon(pixmap); return ICONS[key]
         image = engine.render_button_icon(name, 128, color).convert('RGBA')
@@ -248,21 +250,24 @@ class Desktop(QMainWindow):
         header = QWidget(); top = row(header); logo=QLabel(); logo.setPixmap(self.windowIcon().pixmap(32,32)); top.addWidget(logo)
         brand = QLabel('TacoBot'); brand.setStyleSheet('font-size:21px; font-weight:600;'); top.addWidget(brand)
         self.tabs = []
-        for n, (title, symbol) in enumerate([('YouTube Music','play'),('Soundboard','soundboard'),('TTS','speech')]):
-            tab = QPushButton(title); tab.setCheckable(True); tab.setFixedSize(155 if n == 0 else 140 if n == 1 else 88, 44); tab.setIcon(icon(symbol)); tab.setIconSize(QSize(28,28)); tab.pressed.connect(lambda n=n:self.select_tab(n)); top.addWidget(tab); self.tabs.append(tab)
+        for n, (title, symbol) in enumerate([('YouTube Music','play'),('Soundboard','soundboard'),('TTS','speech'),('Clip Edit','edit')]):
+            tab = QPushButton(title); tab.setCheckable(True); tab.setFixedSize(155 if n == 0 else 140 if n == 1 else 88 if n==2 else 112, 44); tab.setIcon(icon(symbol)); tab.setIconSize(QSize(28,28)); tab.pressed.connect(lambda n=n:self.select_tab(n)); top.addWidget(tab); self.tabs.append(tab)
         top.addStretch()
         top.addWidget(button('Audio', lambda:self.controller.direct_audio_settings(), 'audio'))
         self.direct = QCheckBox('Direct'); self.direct.toggled.connect(lambda value:self.controller.direct_changed(value)); top.addWidget(self.direct)
         self.auto = QCheckBox('Auto-update'); self.auto.setChecked(config.get('auto_update', True)); self.auto.toggled.connect(lambda value:self.controller.auto_changed(value)); top.addWidget(self.auto)
-        self.check = button('Check updates', lambda:self.controller.check_updates(True), 'check'); top.addWidget(self.check)
+        self.check = button('Updates', lambda:self.controller.check_updates(True), 'check'); self.check.setToolTip('Check for updates'); top.addWidget(self.check)
         self.install = button('Install', lambda:self.controller.install_update_now(), 'download'); self.install.setEnabled(False); top.addWidget(self.install)
         layout.addWidget(header)
         self.page_host = QWidget(); self.pages = QStackedLayout(self.page_host); self.pages.setContentsMargins(0,0,0,0); self.pages.setStackingMode(QStackedLayout.StackingMode.StackAll)
-        self.page_widgets = [QWidget() for _ in range(3)]
+        self.page_widgets = [QWidget() for _ in range(4)]
         for page in self.page_widgets:
             page.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             self.pages.addWidget(page)
-        self.build_music(); self.build_clips(); self.build_tts(); layout.addWidget(self.page_host, 1)
+        self.build_music(); self.build_clips(); self.build_tts()
+        from .clip_editor import ClipEditor
+        editor_layout=QVBoxLayout(self.page_widgets[3]); editor_layout.setContentsMargins(0,0,0,0); self.editor=ClipEditor(self); editor_layout.addWidget(self.editor)
+        layout.addWidget(self.page_host, 1)
         footer = QWidget(); foot = row(footer); self.status = QLabel('Connecting your relay'); self.status.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); foot.addWidget(self.status,1); self.identity = QLabel(config.get('relay_name','Personal relay')); foot.addWidget(self.identity); foot.addWidget(QLabel(f'TacoBot v1.{engine.RELAY_BUILD}')); layout.addWidget(footer)
         from .qt_controller import Controller
         self.controller = Controller(self, config, start_agent=start_agent)
@@ -324,6 +329,7 @@ class Desktop(QMainWindow):
         self.lookback=QCheckBox('Playback lookback'); self.lookback.setChecked(self.config.get('playback_lookback',False)); self.lookback.toggled.connect(lambda enabled:self.controller.lookback_changed(enabled)); playback_row.addWidget(self.lookback)
         self.lookback_seconds=QSpinBox(); self.lookback_seconds.setRange(1,300); self.lookback_seconds.setValue(self.config.get('playback_seconds',30)); self.lookback_seconds.setSuffix(' seconds'); self.lookback_seconds.setFixedWidth(135); self.lookback_seconds.valueChanged.connect(lambda value:self.controller.lookback_seconds_changed(value)); playback_row.addWidget(self.lookback_seconds)
         self.save_playback=button('Save Playback',lambda:self.controller.save_playback(),'save'); self.save_playback.setEnabled(False); playback_row.addWidget(self.save_playback); line.addStretch(); line.addWidget(QLabel('Click a clip to play · Right-click to manage')); self.folder = QLabel(self.config.get('mp3_folder','No local folder selected')); self.folder.setMaximumWidth(400); self.folder.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); line.addWidget(self.folder); area.addWidget(details)
+        self.playback_status=QLabel('Lookback is off'); self.playback_status.setStyleSheet('color:#a5b3c1;'); area.addWidget(self.playback_status)
         self.clips = ClipTable(); self.clips.setAcceptDrops(True); self.clips.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
         self.clip_model = ClipModel(self); self.clips.setModel(self.clip_model); self.clips.setItemDelegate(ClipDelegate(self)); self.clips.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.clips.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.clips.setShowGrid(False); self.clips.setAlternatingRowColors(True); self.clips.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel); self.clips.verticalHeader().hide(); self.clips.verticalHeader().setDefaultSectionSize(25); self.clips.verticalHeader().setMinimumSectionSize(25)
@@ -368,9 +374,10 @@ class Desktop(QMainWindow):
         self.controller.import_files([url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]); event.acceptProposedAction()
 
     def closeEvent(self,event):
-        if self.controller.recorder.busy or self.controller.playback_recorder.saving:
+        if self.controller.recorder.busy or self.controller.playback_recorder.saving or self.editor.busy:
             self.controller.close_after_recording=True; self.controller.recorder.stop(); self.status.set('Saving recording before closing…'); event.ignore(); return
         if not self.closing:
             self.closing = True; self.controller.shutdown()
+            self.editor.shutdown()
             self.tray.hide()
         event.accept()

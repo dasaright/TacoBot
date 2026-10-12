@@ -281,3 +281,11 @@ Enable **Playback lookback** in Soundboard to continuously retain the latest spe
 For the authenticated bot owner, right-click a Shared clip and choose **Remove share and save local**. The relay makes a complete local copy with its label/color/volume metadata first, deletes the GitHub shared file through the existing owner-authorized server endpoint, and removes the shared cache copy. Existing local filenames are preserved by numbering collisions. If remote deletion fails, both copies remain and the error is shown. Choose a local folder separate from `sharedclips` for this action.
 
 Record, Playback lookback, seconds, and Save Playback share one horizontal row. Both manual recordings and saved lookbacks automatically receive the **Recording** label. The label is created with a light-blue color if needed; an existing Recording label/color is retained. Labels are saved to the folder's portable metadata before the clip list refreshes.
+
+### Clip Edit
+
+Load a saved clip from the Clip Edit dropdown or open an audio file. The Graphite waveform shows audio peaks with mint start/end handles. Drag the handles, enter precise times, or zoom around the yellow playhead. Play selection previews the chosen start-to-end range on the PC; Play end previews its final two seconds. Play toggles Pause/Resume, Stop halts preview, and Reset selection selects the full clip.
+
+Save trim replaces a local clip only after the cropped file has encoded successfully. Save as new file creates a numbered `(edited N)` copy in the selected local clips folder, preserving the source. Labels, label colors, and clip volume carry over; loudness normalization is recalculated. Shared files always save as new local copies. Original formats are retained. Source changes during editing are detected and require reload before save. Encoding/analysis/preview run independently of the GUI, and all four tabs stay resident for immediate switching.
+
+Lookback now uses exactly the same Windows speaker-capture backend as manual Record. Its persistent feedback shows buffering, saves, the full saved path, and errors. Saves write the trailing available X seconds to an MP3 while capture continues. The Windows package smoke test and automated tests verify waveform decoding, crop encoding, and the playback-buffer-to-real-MP3 path.

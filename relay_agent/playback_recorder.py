@@ -7,7 +7,7 @@ import threading
 import time
 import wave
 
-from .clip_recorder import encode_clip
+from .clip_recorder import encode_clip,capture_speakers
 
 
 class PlaybackBuffer:
@@ -50,6 +50,10 @@ class PlaybackBuffer:
     def clear(self):
         with self.lock: self.chunks.clear(); self.started=None
 
+    def available_seconds(self):
+        with self.lock:
+            return min(self.seconds,max(0,time.monotonic()-self.started)) if self.started is not None else 0
+
 
 class PlaybackRecorder:
     def __init__(self, ffmpeg, events, seconds=30):
@@ -67,24 +71,8 @@ class PlaybackRecorder:
 
     def capture(self):
         try:
-            import pyaudiowpatch as audio
-            with audio.PyAudio() as manager:
-                device=manager.get_default_wasapi_loopback()
-                rate=int(device['defaultSampleRate']); channels=int(device['maxInputChannels'])
-                if channels<1 or rate<1: raise RuntimeError('Default speakers do not support loopback capture.')
-                self.buffer.configure(rate,channels)
-                def callback(data,count,timing,status):
-                    try: self.buffer.append(data); return (None,audio.paContinue)
-                    except Exception: self.stop_event.set(); return (None,audio.paAbort)
-                stream=manager.open(format=audio.paInt16,channels=channels,rate=rate,input=True,
-                    input_device_index=device['index'],frames_per_buffer=1024,stream_callback=callback)
-                try:
-                    self.events.put({'lookback_state':'ready'})
-                    while not self.stop_event.wait(.1):
-                        if not stream.is_active(): raise RuntimeError('Playback capture stopped. Check your output device.')
-                finally:
-                    try: stream.stop_stream()
-                    finally: stream.close()
+            capture_speakers(self.buffer.append,self.stop_event,self.buffer.configure,
+                lambda device:self.events.put({'lookback_state':'ready','lookback_device':device['name']}))
         except Exception as exc: self.events.put({'lookback_error':str(exc)})
         finally:
             if not self.saving: self.buffer.clear()
@@ -96,6 +84,7 @@ class PlaybackRecorder:
         if not Path(folder).is_dir(): raise ValueError('Choose a clips folder first.')
         # Encoding and snapshot copying never run on the GUI thread.
         self.saving=True
+        self.events.put({'playback_save_started':True})
         requested_at=time.monotonic()
         def worker():
             try:

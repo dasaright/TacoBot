@@ -25,12 +25,13 @@ def main():
     if any(flag in sys.argv for flag in ('--update-launch-test','update-restart-test','--self-test')):
         runpy.run_module('relay_agent.main',run_name='__main__')
         if '--self-test' in sys.argv:
-            app=application(); window=Desktop({},start_agent=False); window.show(); app.processEvents(); assert window.pages.count()==3; window.close()
+            app=application(); window=Desktop({},start_agent=False); window.show(); app.processEvents(); assert window.pages.count()==4; window.close()
             if sys.platform=='win32':
                 import pyaudiowpatch
                 import tempfile, wave
                 from pathlib import Path
                 from relay_agent.clip_recorder import encode_clip
+                from relay_agent.clip_editing import crop_clip,waveform
                 with pyaudiowpatch.PyAudio() as capture:
                     assert callable(capture.get_default_wasapi_loopback)
                 with tempfile.TemporaryDirectory() as directory:
@@ -39,6 +40,9 @@ def main():
                         audio.setnchannels(2); audio.setsampwidth(2); audio.setframerate(48000); audio.writeframes(b'\0'*48000*4)
                     assert encode_clip(source,directory,engine.FFMPEG_PATH).stat().st_size>100
                     assert encode_clip(source,directory,engine.FFMPEG_PATH,'Playback',False).name=='Playback 1.mp3'
+                    duration,peaks,stamp=waveform(source,engine.FFMPEG_PATH); assert abs(duration-1)<.01
+                    cropped=crop_clip(source,.2,.8,engine.FFMPEG_PATH,True,directory,stamp)
+                    with wave.open(str(cropped)) as trimmed: assert abs(trimmed.getnframes()/trimmed.getframerate()-.6)<.01
         return
     app=application()
     try:

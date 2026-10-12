@@ -37,15 +37,15 @@ class PresentationTests(unittest.TestCase):
             def capture(): return ImageGrab.grab(bbox=box,all_screens=True)
             def signature(image): return image.convert('RGB').resize((96,48),Image.Resampling.NEAREST).tobytes()
             references=[]
-            for tab in range(3):
+            for tab in range(4):
                 window.select_tab(tab); app.processEvents(); ctypes.windll.dwmapi.DwmFlush()
                 image=capture(); image.save(output/f'tab-{tab}.png'); references.append(signature(image))
-            self.assertEqual(len(set(references)),3,'Captured panes must be distinct')
+            self.assertEqual(len(set(references)),4,'Captured panes must be distinct')
             # Measure presentation without a GIL-holding screen recorder. Pixel
             # acquisition is checked afterwards and its overhead is reported
             # separately; it must not be mistaken for application latency.
             timings=[]; capture_times=[]; missing=[]
-            for tab in [0,1,2]*20:
+            for tab in [0,1,2,3]*20:
                 started=time.perf_counter(); window.tabs[tab].pressed.emit(); app.processEvents(); ctypes.windll.dwmapi.DwmFlush()
                 timings.append((time.perf_counter()-started)*1000)
                 capture_started=time.perf_counter(); shown=signature(capture())
@@ -61,7 +61,7 @@ class PresentationTests(unittest.TestCase):
             # Independent visual-transition test. Recording cannot skew the
             # latency benchmark above, but still catches any intermediate frame.
             from PySide6.QtTest import QTest
-            for tab in [0,1,2]*12:
+            for tab in [0,1,2,3]*12:
                 window.tabs[tab].pressed.emit(); app.processEvents(); ctypes.windll.dwmapi.DwmFlush(); QTest.qWait(16)
             stop.set(); sampler.join(timeout=5)
             partial=[image for image in samples if signature(image) not in references]

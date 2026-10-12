@@ -33,7 +33,7 @@ class QtDesktopTests(unittest.TestCase):
     def test_all_pages_resident_and_switch_does_not_rebuild_models(self):
         w=self.window; model=w.clip_model; rows=model.rows
         with patch.object(self.controller,'render_clips') as rebuild, patch.object(self.controller,'refresh_files') as scan:
-            for n in [1,2,0]*10:
+            for n in [1,2,3,0]*10:
                 w.tabs[n].pressed.emit(); self.app.processEvents()
                 self.assertEqual(w.pages.currentIndex(),n)
                 self.assertTrue(all(page.isVisible() for page in w.page_widgets))
@@ -168,6 +168,25 @@ class QtDesktopTests(unittest.TestCase):
             self.saved['clip_labels']['Recording']='#ffb3b3'
             c.handle_event({'recorded_clip':str(path),'recording_folder':directory})
             self.assertEqual(clip_catalog.read_catalog(directory)['labels']['Recording'],'#ffb3b3')
+
+    def test_clip_editor_trim_handles_preview_and_metadata_copy(self):
+        from PySide6.QtCore import QPoint
+        from relay_agent import clip_catalog
+        w=self.window; c=self.controller; editor=w.editor
+        w.select_tab(3); self.app.processEvents()
+        editor.loaded_fingerprint=(1,1); editor.path=Path('clip.wav'); editor.wave.loaded(3,[.1,.8,.2]*100)
+        editor.start.setRange(0,3); editor.end.setRange(0,3); editor.selection(0,3)
+        y=editor.wave.height()//2
+        QTest.mousePress(editor.wave,Qt.MouseButton.LeftButton,pos=QPoint(18,y))
+        QTest.mouseMove(editor.wave,QPoint(int(editor.wave.x(1)),y)); QTest.mouseRelease(editor.wave,Qt.MouseButton.LeftButton,pos=QPoint(int(editor.wave.x(1)),y))
+        self.assertAlmostEqual(editor.start.value(),1,delta=.02)
+        editor.selection(1,2.5)
+        with patch.object(editor.preview,'start') as play:
+            editor.play_selection(); play.assert_called_once_with(Path('clip.wav'),1,2.5)
+        with tempfile.TemporaryDirectory() as directory,patch.object(c,'refresh_files'):
+            target=Path(directory)/'edited.wav'; target.write_bytes(b'audio')
+            c.editor_saved({'source_key':'a','source':'original.wav','saved':str(target)})
+            self.assertEqual(clip_catalog.read_catalog(directory)['clips'][target.name],{'label':'Memes','volume':20})
 
     def test_owner_unshare_preserves_file_and_metadata_before_remote_delete(self):
         import asyncio

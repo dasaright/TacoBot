@@ -61,8 +61,8 @@ jobs:
           python -c "from relay_agent.desktop import application;
           from relay_agent.qt_desktop import Desktop;
           app=application(); window=Desktop({},start_agent=False); window.show(); app.processEvents();
-          assert window.pages.count()==3;
-          [window.select_tab(n) for n in range(3)]; app.processEvents();
+          assert window.pages.count()==4;
+          [window.select_tab(n) for n in range(4)]; app.processEvents();
           window.close(); print('Qt desktop panels initialized')"
 
       - name: Test relay and Windows installer
