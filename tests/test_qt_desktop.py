@@ -152,6 +152,23 @@ class QtDesktopTests(unittest.TestCase):
         with patch('relay_agent.qt_controller.copy_local') as copied:
             c.unshare_local('b'); copied.assert_not_called(); self.assertFalse(c.editing_clips)
 
+    def test_recording_controls_share_one_row_and_saved_clips_get_portable_label(self):
+        import hashlib
+        from relay_agent import clip_catalog
+        w=self.window; c=self.controller
+        self.assertTrue(all(widget.parent()==w.record.parent() for widget in [w.lookback,w.lookback_seconds,w.save_playback]))
+        with tempfile.TemporaryDirectory() as directory,patch.object(c,'refresh_files'):
+            c.folder.set(directory)
+            for name in ['clipped soundboard (1).mp3','Playback 1.mp3']:
+                path=Path(directory)/name; path.write_bytes(b'audio')
+                c.handle_event({'recorded_clip':str(path),'recording_folder':directory})
+                key=hashlib.sha256(str(path.resolve()).encode()).hexdigest()
+                self.assertEqual(self.saved['clip_settings'][key]['label'],'Recording')
+                self.assertEqual(clip_catalog.read_catalog(directory)['clips'][name]['label'],'Recording')
+            self.saved['clip_labels']['Recording']='#ffb3b3'
+            c.handle_event({'recorded_clip':str(path),'recording_folder':directory})
+            self.assertEqual(clip_catalog.read_catalog(directory)['labels']['Recording'],'#ffb3b3')
+
     def test_owner_unshare_preserves_file_and_metadata_before_remote_delete(self):
         import asyncio
         from unittest.mock import AsyncMock

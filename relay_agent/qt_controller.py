@@ -430,8 +430,14 @@ class Controller(engine.RelayWindow):
             if state=='idle' and self.close_after_recording: QTimer.singleShot(0,self.view.close)
         if event.get('recording_error'): self.status.set('Could not record: '+event['recording_error'])
         if event.get('recorded_clip'):
-            self.status.set('Saved '+Path(event['recorded_clip']).name)
-            if event.get('recording_folder')==self.folder.get(): self.refresh_files()
+            path=Path(event['recorded_clip']); key=hashlib.sha256(str(path.resolve()).encode()).hexdigest()
+            self.config.setdefault('clip_labels',{}).setdefault('Recording',engine.LABEL_COLORS['Light Blue'])
+            self.config.setdefault('clip_settings',{}).setdefault(key,{})['label']='Recording'
+            try:
+                clip_catalog.save_folders({key:path},self.config); self.save()
+            except (OSError,ValueError) as exc: self.status.set('Recording saved, but its label could not be saved: '+str(exc))
+            else: self.status.set('Saved '+path.name)
+            if self.folder.get() and event.get('recording_folder') and Path(event['recording_folder']).resolve()==Path(self.folder.get()).resolve(): self.refresh_files()
         if 'thumbnail_url' in event:
             url=event['thumbnail_url']; self.thumbnail_loading.discard(url)
             pixmap=QPixmap()
