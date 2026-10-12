@@ -236,7 +236,7 @@ class QtDesktopTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             folder=Path(directory); clip=folder/'A.mp3'; clip.write_bytes(b'audio')
             c.agent.local_files={'a':clip}; c.clip_origins={'a':'Local'}; c.render_clips()
-            c.directory_signatures[directory]=c.directory_signature(directory)
+            c.directory_signatures[str(folder.resolve())]=c.directory_signature(directory)
             (folder/'tacobot-clips.json').write_text('{}')
             with patch.object(c.library_watch_timer,'start') as schedule:
                 c.library_directory_changed(directory); schedule.assert_not_called()
