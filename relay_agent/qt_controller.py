@@ -7,7 +7,7 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher
 from PySide6.QtGui import QAction, QColor, QBrush, QPixmap
 from PySide6.QtWidgets import (QApplication, QMenu, QFileDialog, QInputDialog, QMessageBox,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QLineEdit,
@@ -61,6 +61,8 @@ class Controller(engine.RelayWindow):
         self.save_timer = QTimer(view); self.save_timer.setSingleShot(True); self.save_timer.timeout.connect(self.save)
         self.poll_timer = QTimer(view); self.poll_timer.timeout.connect(self.poll); self.poll_timer.start(16)
         self.render_favorites()
+        self.folder_watcher=QFileSystemWatcher(view); self.folder_watcher.directoryChanged.connect(self.library_directory_changed)
+        self.directory_signatures={}; self.library_watch_timer=QTimer(view); self.library_watch_timer.setSingleShot(True); self.library_watch_timer.setInterval(250); self.library_watch_timer.timeout.connect(self.refresh_files)
         if start_agent:
             threading.Thread(target=self.run_agent,daemon=True).start(); self.refresh_files()
             if config.get('direct_soundboard'): QTimer.singleShot(300,lambda:self.direct_changed(True))
@@ -95,9 +97,11 @@ class Controller(engine.RelayWindow):
         def scan():
             try:
                 files = engine.scan_audio_folder(folder) if folder else {}
+                files={key:path for key,path in files.items() if not path.name.startswith('.tacobot-')}
                 origins = {key: 'Local' for key in files}
                 engine.SHARED_CLIPS_DIR.mkdir(parents=True, exist_ok=True)
                 shared = engine.scan_audio_folder(str(engine.SHARED_CLIPS_DIR))
+                shared={key:path for key,path in shared.items() if not path.name.startswith('.tacobot-')}
                 settings, colors, errors = {}, {}, []
                 folders = [(folder, files)] if folder else []
                 if not folder or Path(folder).resolve() != engine.SHARED_CLIPS_DIR.resolve():
@@ -114,6 +118,42 @@ class Controller(engine.RelayWindow):
             except Exception as exc:
                 self.agent.events.put({'error': str(exc)})
         threading.Thread(target=scan, daemon=True).start()
+
+    def directory_signature(self,directory):
+        try:
+            result=[]
+            for path in Path(directory).iterdir():
+                if path.name.startswith('.tacobot-') or path.suffix.lower() not in engine.AUDIO_EXTENSIONS: continue
+                try:
+                    stat=path.stat()
+                    if path.is_file() and stat.st_size: result.append((path.name,stat.st_size,stat.st_mtime_ns))
+                except OSError: pass
+            return tuple(sorted(result))
+        except OSError: return ()
+
+    def update_folder_watcher(self):
+        if not self.started: return
+        folders={str(Path(folder).resolve()) for folder in [self.folder.get(),str(engine.SHARED_CLIPS_DIR)] if folder and Path(folder).is_dir()}
+        current={str(Path(path).resolve()):path for path in self.folder_watcher.directories()}
+        if set(current)-folders: self.folder_watcher.removePaths([current[key] for key in set(current)-folders])
+        if folders-set(current): self.folder_watcher.addPaths(list(folders-set(current)))
+        self.directory_signatures={folder:self.directory_signature(folder) for folder in folders}
+
+    def prune_deleted_files(self):
+        missing=[key for key,path in self.agent.local_files.items() if not path.is_file()]
+        for key in missing:
+            self.agent.local_files.pop(key,None); self.clip_origins.pop(key,None)
+        if missing:
+            self.scan_generation=getattr(self,'scan_generation',0)+1
+            self.render_clips()
+        return missing
+
+    def library_directory_changed(self,directory):
+        directory=str(Path(directory).resolve())
+        signature=self.directory_signature(directory)
+        if signature==self.directory_signatures.get(directory): return
+        self.directory_signatures[directory]=signature
+        self.prune_deleted_files(); self.library_watch_timer.start()
 
     def auto_changed(self,value):
         self.config['auto_update']=value; self.save(); self.next_update_check=0
@@ -321,7 +361,7 @@ class Controller(engine.RelayWindow):
             return await self.agent.edit_clip_file(key,path,new_name)
         future=asyncio.run_coroutine_threadsafe(edit(),self.loop)
         def done(result):
-            try: self.agent.events.put({'clip_edit_done':key,'status':result.result(),'renamed_path':str(target) if target else None})
+            try: self.agent.events.put({'clip_edit_done':key,'status':result.result(),'renamed_path':str(target) if target else None,'original_path':str(path)})
             except Exception as exc: self.agent.events.put({'clip_edit_done':key,'clip_edit_error':str(exc)})
         future.add_done_callback(done)
 
@@ -491,6 +531,7 @@ class Controller(engine.RelayWindow):
             self.config.setdefault('clip_settings', {}).update(event.get('clip_metadata', {}))
             self.config.setdefault('clip_labels', {}).update(event.get('clip_colors', {}))
             self.agent.local_files=event['library']; self.clip_origins=event['origins']; self.render_clips()
+            self.update_folder_watcher()
             if event.get('metadata_error'): self.status.set(event['metadata_error'])
             if self.started: asyncio.run_coroutine_threadsafe(self.agent.preload_normalization(dict(self.agent.local_files)),self.loop)
         if event.get('import_done') and event.get('folder')==self.folder.get(): self.refresh_files()
@@ -506,13 +547,18 @@ class Controller(engine.RelayWindow):
             self.refresh_files()
         if event.get('clip_edit_done'):
             key=event['clip_edit_done']; self.editing_clips.discard(key)
-            if event.get('renamed_path'):
-                old_path=self.agent.local_files.get(key)
+            if event.get('renamed_path') and not event.get('clip_edit_error'):
+                old_path=Path(event['original_path']) if event.get('original_path') else self.agent.local_files.get(key)
                 if self.started and old_path:
                     try: clip_catalog.rename_entry(old_path,event['renamed_path'])
                     except (OSError, ValueError) as exc: self.status.set(str(exc))
                 settings=self.config.setdefault('clip_settings',{}); old=settings.pop(key,None)
                 if old is not None: settings[hashlib.sha256(str(Path(event['renamed_path']).resolve()).encode()).hexdigest()]=old; self.save()
+                path=Path(event['renamed_path']).resolve(); new_key=hashlib.sha256(str(path).encode()).hexdigest()
+                self.agent.local_files.pop(key,None); self.clip_origins.pop(key,None)
+                self.agent.local_files[new_key]=path; self.clip_origins[new_key]='Shared' if path.parent==engine.SHARED_CLIPS_DIR.resolve() else 'Local'; self.render_clips()
+            elif not event.get('clip_edit_error'):
+                self.agent.local_files.pop(key,None); self.clip_origins.pop(key,None); self.render_clips()
             self.refresh_files()
         if 'favorite_playlist' in event:
             key=event['favorite_playlist']; getattr(self,'loading_playlists',set()).discard(key)
@@ -577,6 +623,8 @@ class Controller(engine.RelayWindow):
         self.view.close()
 
     def shutdown(self):
+        self.library_watch_timer.stop()
+        if self.folder_watcher.directories(): self.folder_watcher.removePaths(self.folder_watcher.directories())
         self.playback_recorder.stop()
         self.poll_timer.stop(); self.save_timer.stop(); self.agent.direct_audio.close(); self.config['clip_normalization']=self.agent.normalization_cache; self.save()
         if self.started:

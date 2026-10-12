@@ -1145,7 +1145,7 @@ def scan_audio_folder(folder, ffmpeg_path=FFMPEG_PATH):
         return {}
     return {hashlib.sha256(str(file.resolve()).encode()).hexdigest(): file.resolve()
             for file in sorted(path.iterdir(), key=lambda file: file.name.casefold())
-            if is_playable_audio(file, ffmpeg_path)}
+            if not file.name.startswith('.tacobot-') and is_playable_audio(file, ffmpeg_path)}
 
 
 # Keep compatibility with existing imports and relay configuration.

@@ -1,4 +1,4 @@
-"""A bounded, timestamped speaker lookback. Nothing is saved until requested."""
+"""Lossless PCM lookback: native samples stay contiguous despite callback jitter."""
 from collections import deque
 from pathlib import Path
 import sys
@@ -13,46 +13,50 @@ from .clip_recorder import encode_clip,capture_speakers
 class PlaybackBuffer:
     def __init__(self, seconds=30):
         self.seconds=seconds; self.rate=48000; self.channels=2
-        self.started=None; self.chunks=deque(); self.lock=threading.Lock()
+        self.started=None; self.chunks=deque(); self.byte_count=0; self.lock=threading.Lock()
 
     def configure(self, rate, channels):
         with self.lock:
-            self.rate=rate; self.channels=channels; self.chunks.clear(); self.started=time.monotonic()
+            self.rate=rate; self.channels=channels; self.chunks.clear(); self.byte_count=0; self.started=time.monotonic()
 
     def set_seconds(self, seconds):
         with self.lock:
             self.seconds=max(1,min(300,int(seconds))); self.trim(time.monotonic())
 
     def trim(self, now):
-        while self.chunks and self.chunks[0][0] < now-self.seconds:
-            self.chunks.popleft()
+        limit=int(self.seconds*self.rate)*self.channels*2
+        while self.chunks and self.byte_count>limit:
+            excess=self.byte_count-limit
+            chunk=self.chunks.popleft()
+            if len(chunk)>excess:
+                self.chunks.appendleft(chunk[excess:]); self.byte_count-=excess
+            else: self.byte_count-=len(chunk)
 
     def append(self, data, now=None):
         now=time.monotonic() if now is None else now
         with self.lock:
-            self.chunks.append((now,bytes(data))); self.trim(now)
+            width=self.channels*2; data=bytes(data)
+            if len(data)%width: raise ValueError('Speaker capture returned an incomplete PCM frame.')
+            if data: self.chunks.append(data); self.byte_count+=len(data); self.trim(now)
 
     def snapshot(self, now=None):
-        now=time.monotonic() if now is None else now
+        chunks,rate,channels=self.freeze_snapshot()
+        return b''.join(chunks),rate,channels
+
+    def freeze_snapshot(self):
         with self.lock:
             if self.started is None: raise ValueError('Enable playback lookback first.')
-            duration=min(self.seconds,max(0,now-self.started))
-            frames=int(duration*self.rate)
-            if frames<1: raise ValueError('Wait for some playback audio to be buffered.')
-            start=now-frames/self.rate; width=self.channels*2; output=bytearray(frames*width)
-            self.trim(now)
-            for end,data in self.chunks:
-                count=len(data)//width; offset=round((end-count/self.rate-start)*self.rate)
-                left=max(0,offset); right=min(frames,offset+count)
-                if right>left: output[left*width:right*width]=data[(left-offset)*width:(right-offset)*width]
-            return bytes(output),self.rate,self.channels
+            if not self.byte_count: raise ValueError('Wait for speaker audio to be captured before saving.')
+            # Never insert silence, resample, or overlap buffers using Python
+            # callback timestamps. Record writes exactly this same PCM sequence.
+            return tuple(self.chunks),self.rate,self.channels
 
     def clear(self):
-        with self.lock: self.chunks.clear(); self.started=None
+        with self.lock: self.chunks.clear(); self.byte_count=0; self.started=None
 
     def available_seconds(self):
         with self.lock:
-            return min(self.seconds,max(0,time.monotonic()-self.started)) if self.started is not None else 0
+            return self.byte_count/(self.rate*self.channels*2) if self.started is not None else 0
 
 
 class PlaybackRecorder:
@@ -82,13 +86,13 @@ class PlaybackRecorder:
         if self.saving: return
         if not self.active: raise ValueError('Enable playback lookback first.')
         if not Path(folder).is_dir(): raise ValueError('Choose a clips folder first.')
+        chunks,rate,channels=self.buffer.freeze_snapshot()
         # Encoding and snapshot copying never run on the GUI thread.
         self.saving=True
         self.events.put({'playback_save_started':True})
-        requested_at=time.monotonic()
         def worker():
             try:
-                data,rate,channels=self.buffer.snapshot(requested_at)
+                data=b''.join(chunks)
                 with tempfile.TemporaryDirectory(prefix='TacoBot-playback-') as directory:
                     source=Path(directory)/'playback.wav'
                     with wave.open(str(source),'wb') as output:

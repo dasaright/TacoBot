@@ -220,6 +220,29 @@ class QtDesktopTests(unittest.TestCase):
                 c.unshare_local('b')
             self.assertTrue(source.exists()); self.assertEqual((local/'clip.mp3').read_bytes(),b'audio'); c.agent.edit_clip_file.assert_not_awaited()
 
+    def test_delete_removes_row_and_editor_choice_before_rescan(self):
+        c=self.controller; w=self.window
+        with patch.object(c,'refresh_files') as scan:
+            c.handle_event({'clip_edit_done':'a'})
+        self.assertNotIn('a',c.agent.local_files); self.assertNotIn('a',c.file_ids)
+        self.assertEqual(w.clip_model.rowCount(),1)
+        self.assertEqual(w.editor.files.count(),1); scan.assert_called_once()
+
+    def test_failed_delete_keeps_row_and_folder_metadata_changes_do_not_rescan(self):
+        c=self.controller
+        with patch.object(c,'refresh_files'):
+            c.handle_event({'clip_edit_done':'a','clip_edit_error':'failed'})
+        self.assertIn('a',c.file_ids)
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory); clip=folder/'A.mp3'; clip.write_bytes(b'audio')
+            c.agent.local_files={'a':clip}; c.clip_origins={'a':'Local'}; c.render_clips()
+            c.directory_signatures[directory]=c.directory_signature(directory)
+            (folder/'tacobot-clips.json').write_text('{}')
+            with patch.object(c.library_watch_timer,'start') as schedule:
+                c.library_directory_changed(directory); schedule.assert_not_called()
+                clip.unlink(); c.library_directory_changed(directory); schedule.assert_called_once()
+            self.assertNotIn('a',c.file_ids); self.assertEqual(self.window.editor.files.count(),0)
+
     def test_fresh_desktop_scans_portable_folder_metadata(self):
         from relay_agent import clip_catalog, main as engine
         with tempfile.TemporaryDirectory() as directory:

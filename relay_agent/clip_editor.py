@@ -108,6 +108,8 @@ class ClipEditor(QWidget):
         self.timer=QTimer(self); self.timer.timeout.connect(self.poll); self.timer.start(30)
 
     def set_files(self,files,origins):
+        if self.path is not None and not self.path.is_file() and not self.busy:
+            self.stop_preview(); self.loaded_fingerprint=None; self.wave.loaded(0,[]); self.play.setEnabled(False); self.save.setEnabled(False); self.info.setText('This clip was removed. Select another clip.'); self.path=None
         signature=tuple((key,str(path),origins.get(key)) for key,path in files.items())
         if signature==self.files_signature: return
         self.files_signature=signature; selected=self.files.currentData(); self.files.blockSignals(True); self.files.clear()

@@ -289,3 +289,9 @@ Load a saved clip from the Clip Edit dropdown or open an audio file. The Graphit
 Save trim replaces a local clip only after the cropped file has encoded successfully. Save as new file creates a numbered `(edited N)` copy in the selected local clips folder, preserving the source. Labels, label colors, and clip volume carry over; loudness normalization is recalculated. Shared files always save as new local copies. Original formats are retained. Source changes during editing are detected and require reload before save. Encoding/analysis/preview run independently of the GUI, and all four tabs stay resident for immediate switching.
 
 Lookback now uses exactly the same Windows speaker-capture backend as manual Record. Its persistent feedback shows buffering, saves, the full saved path, and errors. Saves write the trailing available X seconds to an MP3 while capture continues. The Windows package smoke test and automated tests verify waveform decoding, crop encoding, and the playback-buffer-to-real-MP3 path.
+
+### Lookback quality and file-list updates
+
+Lookback retains native PCM samples in a contiguous, frame-counted ring buffer. Python callback arrival times never reposition samples, insert gaps, or overwrite neighboring chunks. Save Playback freezes the retained sample sequence at the click and encodes it with the same MP3 settings as Record. Buffer progress reflects captured samples. Native silence is preserved; an empty capture is reported instead of generating an artificial silent file.
+
+Successful deletion/rename updates the soundboard and editor choices immediately, before the background scan. A directory watcher also detects audio changes made outside the relay. Label metadata changes and internal encoding temp files are ignored, avoiding unnecessary rescans.
