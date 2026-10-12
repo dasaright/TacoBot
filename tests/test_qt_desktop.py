@@ -137,6 +137,53 @@ class QtDesktopTests(unittest.TestCase):
         c.recorder.busy=False; c.handle_event({'recorder_state':'idle'})
         self.assertEqual(w.record.text(),'Record'); self.assertTrue(w.record.isEnabled())
 
+    def test_lookback_settings_controls_and_owner_gate(self):
+        c=self.controller; w=self.window
+        self.assertEqual(w.lookback_seconds.value(),30); self.assertFalse(w.lookback.isChecked())
+        w.lookback_seconds.setValue(45)
+        self.assertEqual(self.saved['playback_seconds'],45); self.assertEqual(c.playback_recorder.buffer.seconds,45)
+        with patch.object(c.playback_recorder,'start') as start:
+            w.lookback.setChecked(True); start.assert_called_once()
+        c.handle_event({'lookback_state':'ready'}); self.assertTrue(w.save_playback.isEnabled())
+        c.folder.set('clips')
+        with patch.object(c.playback_recorder,'save') as save:
+            w.save_playback.click(); save.assert_called_once_with('clips')
+        self.assertFalse(w.save_playback.isEnabled())
+        with patch('relay_agent.qt_controller.copy_local') as copied:
+            c.unshare_local('b'); copied.assert_not_called(); self.assertFalse(c.editing_clips)
+
+    def test_owner_unshare_preserves_file_and_metadata_before_remote_delete(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        from relay_agent import clip_catalog
+        c=self.controller
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); shared=root/'shared'; local=root/'local'; shared.mkdir(); local.mkdir()
+            source=shared/'clip.mp3'; source.write_bytes(b'audio')
+            self.saved['shared_owner']=True; c.agent.local_files['b']=source; c.clip_origins['b']='Shared'; c.folder.set(str(local))
+            self.saved['clip_settings']['b']={'label':'Memes','volume':20}
+            def remote(config,path):
+                self.assertEqual((local/'clip.mp3').read_bytes(),b'audio')
+                self.assertEqual(clip_catalog.read_catalog(local)['clips']['clip.mp3'],{'label':'Memes','volume':20})
+                self.assertTrue(source.exists())
+            async def deleted(key,path): path.unlink()
+            c.agent.edit_clip_file=AsyncMock(side_effect=deleted)
+            with patch('relay_agent.qt_controller.asyncio.run_coroutine_threadsafe',side_effect=lambda coro,loop:asyncio.run(coro)),patch('relay_agent.main.edit_shared_clip',side_effect=remote) as remove:
+                c.unshare_local('b')
+            remove.assert_called_once(); self.assertFalse(source.exists()); self.assertTrue((local/'clip.mp3').exists())
+
+    def test_failed_unshare_keeps_shared_and_completed_local_copy(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        c=self.controller
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); shared=root/'shared'; local=root/'local'; shared.mkdir(); local.mkdir()
+            source=shared/'clip.mp3'; source.write_bytes(b'audio'); self.saved['shared_owner']=True
+            c.agent.local_files['b']=source; c.clip_origins['b']='Shared'; c.folder.set(str(local)); c.agent.edit_clip_file=AsyncMock()
+            with patch('relay_agent.qt_controller.asyncio.run_coroutine_threadsafe',side_effect=lambda coro,loop:asyncio.run(coro)),patch('relay_agent.main.edit_shared_clip',side_effect=RuntimeError('denied')):
+                c.unshare_local('b')
+            self.assertTrue(source.exists()); self.assertEqual((local/'clip.mp3').read_bytes(),b'audio'); c.agent.edit_clip_file.assert_not_awaited()
+
     def test_fresh_desktop_scans_portable_folder_metadata(self):
         from relay_agent import clip_catalog, main as engine
         with tempfile.TemporaryDirectory() as directory:

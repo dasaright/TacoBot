@@ -38,6 +38,7 @@ def main():
                     with wave.open(str(source),'wb') as audio:
                         audio.setnchannels(2); audio.setsampwidth(2); audio.setframerate(48000); audio.writeframes(b'\0'*48000*4)
                     assert encode_clip(source,directory,engine.FFMPEG_PATH).stat().st_size>100
+                    assert encode_clip(source,directory,engine.FFMPEG_PATH,'Playback',False).name=='Playback 1.mp3'
         return
     app=application()
     try:

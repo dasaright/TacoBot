@@ -273,3 +273,9 @@ The window, Windows executable/taskbar, and running tray icon use `relay_agent/a
 ### Record speaker audio
 
 In Soundboard, click **Record** to capture the Windows default playback device (speakers/headphones). Click **Stop Recording** to save an MP3 in the clips folder selected when recording started. The next unused `clipped soundboard (1).mp3`, `(2)`, etc. is chosen without overwriting existing clips. The clip list refreshes after saving. Capture and encoding run off the GUI thread and use disk instead of keeping a long recording in RAM. Closing the relay stops and saves an active recording before exit; updater installation waits while capture/encoding is active. No microphone or virtual-cable setup is required. All audio audible through that Windows playback output is captured.
+
+### Playback lookback and owner unsharing
+
+Enable **Playback lookback** in Soundboard to continuously retain the latest speaker audio. Choose 1–300 seconds (default 30). **Save Playback** saves the available trailing audio as `Playback 1.mp3`, `Playback 2.mp3`, etc. in the current clips folder. Silence remains in its correct position. The bounded buffer stays in memory; only explicit saves write clips. Switch and seconds settings persist, while the buffer starts fresh on launch. Recording continues during MP3 saves; saves and manual recording finish before exit/update.
+
+For the authenticated bot owner, right-click a Shared clip and choose **Remove share and save local**. The relay makes a complete local copy with its label/color/volume metadata first, deletes the GitHub shared file through the existing owner-authorized server endpoint, and removes the shared cache copy. Existing local filenames are preserved by numbering collisions. If remote deletion fails, both copies remain and the error is shown. Choose a local folder separate from `sharedclips` for this action.

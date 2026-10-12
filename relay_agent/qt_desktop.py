@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QIcon, QImage, QPixmap, QDrag,
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedLayout, QPushButton, QLabel, QCheckBox, QLineEdit, QSlider, QTableView,
     QStyledItemDelegate, QTreeWidget, QAbstractItemView, QSplitter, QTextEdit,
-    QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView, QSystemTrayIcon)
+    QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView, QSystemTrayIcon, QSpinBox)
 
 from . import main as engine
 from .app_icon import application_icon
@@ -320,6 +320,10 @@ class Desktop(QMainWindow):
         bar.addWidget(QLabel('Search clips')); self.search = QLineEdit(); self.search.setClearButtonEnabled(True); self.search.setFixedWidth(190); self.search.setPlaceholderText('Name or label'); self.search.textChanged.connect(lambda:self.controller.render_clips()); bar.addWidget(self.search)
         self.clip_volume = self.volume(bar,'bot_clip_volume'); bar.addWidget(button('Refresh',lambda:self.controller.refresh_files(),'refresh')); bar.addWidget(button('Sync',lambda:self.controller.sync_shared(),'sync')); bar.addStretch(); bar.addWidget(button('Open folder',lambda:self.controller.choose_folder(),'folder')); area.addWidget(tools)
         details = QWidget(); line = row(details); self.record=button('Record',lambda:self.controller.toggle_recording(),'record'); self.record.setMinimumWidth(150); line.addWidget(self.record); line.addStretch(); line.addWidget(QLabel('Click a clip to play · Right-click to manage')); self.folder = QLabel(self.config.get('mp3_folder','No local folder selected')); self.folder.setMaximumWidth(400); self.folder.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); line.addWidget(self.folder); area.addWidget(details)
+        playback=QWidget(); playback_row=row(playback)
+        self.lookback=QCheckBox('Playback lookback'); self.lookback.setChecked(self.config.get('playback_lookback',False)); self.lookback.toggled.connect(lambda enabled:self.controller.lookback_changed(enabled)); playback_row.addWidget(self.lookback)
+        self.lookback_seconds=QSpinBox(); self.lookback_seconds.setRange(1,300); self.lookback_seconds.setValue(self.config.get('playback_seconds',30)); self.lookback_seconds.setSuffix(' seconds'); self.lookback_seconds.setFixedWidth(135); self.lookback_seconds.valueChanged.connect(lambda value:self.controller.lookback_seconds_changed(value)); playback_row.addWidget(self.lookback_seconds)
+        self.save_playback=button('Save Playback',lambda:self.controller.save_playback(),'save'); self.save_playback.setEnabled(False); playback_row.addWidget(self.save_playback); playback_row.addStretch(); area.addWidget(playback)
         self.clips = ClipTable(); self.clips.setAcceptDrops(True); self.clips.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
         self.clip_model = ClipModel(self); self.clips.setModel(self.clip_model); self.clips.setItemDelegate(ClipDelegate(self)); self.clips.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.clips.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.clips.setShowGrid(False); self.clips.setAlternatingRowColors(True); self.clips.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel); self.clips.verticalHeader().hide(); self.clips.verticalHeader().setDefaultSectionSize(25); self.clips.verticalHeader().setMinimumSectionSize(25)
@@ -364,7 +368,7 @@ class Desktop(QMainWindow):
         self.controller.import_files([url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]); event.acceptProposedAction()
 
     def closeEvent(self,event):
-        if self.controller.recorder.busy:
+        if self.controller.recorder.busy or self.controller.playback_recorder.saving:
             self.controller.close_after_recording=True; self.controller.recorder.stop(); self.status.set('Saving recording before closing…'); event.ignore(); return
         if not self.closing:
             self.closing = True; self.controller.shutdown()

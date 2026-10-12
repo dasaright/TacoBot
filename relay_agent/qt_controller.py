@@ -17,6 +17,8 @@ from . import main as engine
 from . import clip_catalog
 from .youtube_thumbnail import youtube_thumbnail
 from .clip_recorder import ClipRecorder
+from .playback_recorder import PlaybackRecorder
+from .unshare_clip import copy_local
 from .qt_adapters import Value, Control, Text, Root, Tree
 
 
@@ -25,6 +27,7 @@ class Controller(engine.RelayWindow):
         self.view, self.config = view, config
         self.root = Root(view); self.agent = engine.RelayAgent(config)
         self.recorder = ClipRecorder(engine.FFMPEG_PATH, self.agent.events); self.close_after_recording = False
+        self.playback_recorder=PlaybackRecorder(engine.FFMPEG_PATH,self.agent.events,view.lookback_seconds.value())
         self.loop = asyncio.new_event_loop(); self.started = start_agent
         self.status = Value(getter=view.status.text,setter=view.status.setText)
         self.identity = Value(getter=view.identity.text,setter=view.identity.setText)
@@ -61,6 +64,7 @@ class Controller(engine.RelayWindow):
         if start_agent:
             threading.Thread(target=self.run_agent,daemon=True).start(); self.refresh_files()
             if config.get('direct_soundboard'): QTimer.singleShot(300,lambda:self.direct_changed(True))
+            if config.get('playback_lookback'): QTimer.singleShot(300,lambda:self.lookback_changed(True))
 
     def set_combo(self, combo, text):
         combo.blockSignals(True)
@@ -185,8 +189,29 @@ class Controller(engine.RelayWindow):
 
     def poll_updates(self):
         # Neither a manual install nor auto-update may interrupt capture/encoding.
-        if self.recorder.busy: return
+        if self.recorder.busy or self.playback_recorder.saving or self.editing_clips: return
         return super().poll_updates()
+
+    def lookback_changed(self,enabled):
+        self.config['playback_lookback']=enabled; self.save(); self.view.save_playback.setEnabled(False)
+        try:
+            if enabled:
+                if self.playback_recorder.active and self.playback_recorder.stop_event.is_set():
+                    return # stopped event restarts the newly requested capture
+                self.playback_recorder.start()
+            else: self.playback_recorder.stop()
+        except Exception as exc:
+            self.handle_event({'lookback_error':str(exc)})
+
+    def lookback_seconds_changed(self,value):
+        self.config['playback_seconds']=value; self.playback_recorder.buffer.set_seconds(value); self.save_later()
+
+    def save_playback(self):
+        if not self.folder.get(): self.choose_folder()
+        if not self.folder.get(): return
+        try:
+            self.playback_recorder.save(self.folder.get()); self.view.save_playback.setEnabled(False)
+        except Exception as exc: self.status.set(str(exc))
 
     def import_files(self,paths):
         if not self.folder.get():
@@ -226,6 +251,8 @@ class Controller(engine.RelayWindow):
         menu=QMenu(self.view); path=self.agent.local_files[key]; local=self.clip_origins.get(key)=='Local'
         for text,delete in [('Share',False),('Share then del local',True)]:
             action=menu.addAction(text); action.setEnabled(local and not self.sync_running); action.triggered.connect(lambda checked=False,delete=delete:self.share_local(key,delete))
+        if not local and self.config.get('shared_owner'):
+            action=menu.addAction('Remove share and save local',lambda:self.unshare_local(key)); action.setEnabled(not self.sync_running and key not in self.editing_clips)
         menu.addSeparator(); menu.addAction('Rename',lambda:self.rename(key)); menu.addAction('Delete',lambda:self.delete(key)); menu.addSeparator()
         menu.addAction('Add Label',lambda:self.add_label_for(key)); colors=menu.addMenu('Change Label Color'); label=self.clip_setting(key).get('label'); colors.setEnabled(bool(label))
         for name,color in engine.LABEL_COLORS.items():
@@ -285,6 +312,25 @@ class Controller(engine.RelayWindow):
                 target=await self.agent.share_clip_file(key,path,engine.SHARED_CLIPS_DIR,delete)
                 self.agent.events.put({'share_done':key,'shared_path':str(target),'share_settings':settings})
             except Exception as exc: self.agent.events.put({'share_done':key,'share_error':str(exc)})
+        asyncio.run_coroutine_threadsafe(work(),self.loop)
+
+    def unshare_local(self,key):
+        if not self.config.get('shared_owner') or self.clip_origins.get(key)!='Shared': return
+        if self.sync_running or self.editing_clips: return
+        if not self.folder.get(): self.choose_folder()
+        if not self.folder.get(): return
+        folder=self.folder.get(); path=self.agent.local_files[key]; settings=dict(self.clip_setting(key)); colors=dict(self.config.get('clip_labels',{}))
+        self.editing_clips.add(key)
+        async def work():
+            target=None; error=None
+            try:
+                target=await asyncio.to_thread(copy_local,path,folder)
+                new_key=hashlib.sha256(str(target.resolve()).encode()).hexdigest()
+                await asyncio.to_thread(clip_catalog.save_folders,{new_key:target},{'clip_settings':{new_key:settings},'clip_labels':colors})
+                await asyncio.to_thread(engine.edit_shared_clip,self.config,path)
+                await self.agent.edit_clip_file(key,path)
+            except Exception as exc: error=str(exc)
+            self.agent.events.put({'unshare_done':key,'unshare_path':str(target) if target else None,'unshare_settings':settings,'unshare_error':error})
         asyncio.run_coroutine_threadsafe(work(),self.loop)
 
     def ordered_selection(self,kind):
@@ -358,6 +404,22 @@ class Controller(engine.RelayWindow):
         if self.started: self.poll_updates()
 
     def handle_event(self,event):
+        if 'lookback_state' in event:
+            state=event['lookback_state']; self.view.save_playback.setEnabled(state=='ready' and self.view.lookback.isChecked() and not self.playback_recorder.saving)
+            if state=='stopped' and self.view.lookback.isChecked() and not self.close_after_recording: self.lookback_changed(True)
+        if event.get('lookback_error'):
+            self.view.lookback.blockSignals(True); self.view.lookback.setChecked(False); self.view.lookback.blockSignals(False)
+            self.config['playback_lookback']=False; self.save(); self.status.set('Playback lookback: '+event['lookback_error']); self.view.save_playback.setEnabled(False)
+        if event.get('playback_saved'):
+            self.view.save_playback.setEnabled(self.view.lookback.isChecked() and self.playback_recorder.active)
+            if self.close_after_recording: QTimer.singleShot(0,self.view.close)
+        if event.get('unshare_done'):
+            self.editing_clips.discard(event['unshare_done'])
+            if event.get('unshare_path'):
+                path=Path(event['unshare_path']); key=hashlib.sha256(str(path.resolve()).encode()).hexdigest(); self.config.setdefault('clip_settings',{})[key]=event['unshare_settings']; self.save()
+            self.refresh_files()
+            prefix='Kept local copy; could not finish removing share: ' if event.get('unshare_path') else 'Could not remove share: '
+            self.status.set((prefix+event['unshare_error']) if event.get('unshare_error') else 'Removed share and saved local copy.')
         if 'recorder_state' in event:
             state=event['recorder_state']; self.view.record.setText('Stop Recording' if state=='recording' else 'Record')
             self.view.record.setEnabled(state in ('recording','idle'))
@@ -478,6 +540,7 @@ class Controller(engine.RelayWindow):
         self.view.close()
 
     def shutdown(self):
+        self.playback_recorder.stop()
         self.poll_timer.stop(); self.save_timer.stop(); self.agent.direct_audio.close(); self.config['clip_normalization']=self.agent.normalization_cache; self.save()
         if self.started:
             def cancel():

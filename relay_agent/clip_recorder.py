@@ -8,13 +8,13 @@ import threading
 import wave
 
 
-def reserve_clip(folder):
+def reserve_clip(folder, prefix='clipped soundboard', parentheses=True):
     folder = Path(folder)
     if not folder.is_dir():
         raise ValueError('Choose an existing clips folder before recording.')
     number = 1
     while True:
-        target = folder / f'clipped soundboard ({number}).mp3'
+        target = folder / (f'{prefix} ({number}).mp3' if parentheses else f'{prefix} {number}.mp3')
         try:
             with target.open('xb'):
                 pass
@@ -23,8 +23,8 @@ def reserve_clip(folder):
             number += 1
 
 
-def encode_clip(wav, folder, ffmpeg):
-    target = reserve_clip(folder)
+def encode_clip(wav, folder, ffmpeg, prefix='clipped soundboard', parentheses=True):
+    target = reserve_clip(folder, prefix, parentheses)
     temporary = None
     try:
         fd, temporary = tempfile.mkstemp(prefix='.tacobot-record-', suffix='.tmp', dir=folder)
