@@ -108,7 +108,8 @@ class Controller(engine.RelayWindow):
                     folders.append((engine.SHARED_CLIPS_DIR, shared))
                 for directory, clips in folders:
                     try:
-                        loaded, labels = clip_catalog.load_folder(directory, clips, snapshot)
+                        loaded, labels = clip_catalog.load_folder(directory, clips, snapshot,
+                            default_label='Shared' if Path(directory).resolve()==engine.SHARED_CLIPS_DIR.resolve() else None)
                         settings.update(loaded); colors.update(labels)
                     except (OSError, ValueError) as exc:
                         errors.append(str(exc))
@@ -381,6 +382,8 @@ class Controller(engine.RelayWindow):
     def share_local(self,key,delete=False):
         if self.sync_running or self.editing_clips: return
         path=self.agent.local_files[key]; self.editing_clips.add(key); settings=dict(self.clip_setting(key)); config=self.config
+        if not settings.get('label','').strip():
+            settings['label']='Shared'; config.setdefault('clip_labels',{}).setdefault('Shared',engine.LABEL_COLORS['Light Blue'])
         async def work():
             try:
                 await asyncio.to_thread(engine.check_share_target,config,path)

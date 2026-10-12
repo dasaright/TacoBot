@@ -54,7 +54,7 @@ def clean_settings(value):
     return result
 
 
-def load_folder(folder, files, config):
+def load_folder(folder, files, config, default_label=None):
     """Create on first selection, migrate config, then prefer portable metadata."""
     with LOCK:
         value = read_catalog(folder)
@@ -69,7 +69,12 @@ def load_folder(folder, files, config):
             if entry is None:
                 entry = clean_settings(settings.get(key, {}))
                 value['clips'][path.name] = entry
-            loaded[key] = clean_settings(entry)
+            entry = clean_settings(entry)
+            if default_label and not entry.get('label', '').strip():
+                entry['label'] = default_label
+                colors.setdefault(default_label, '#b3d9ff')
+                value['clips'][path.name] = entry
+            loaded[key] = entry
         # Store only color definitions, never global config/private credentials.
         value['labels'] = colors
         write_catalog(folder, value)

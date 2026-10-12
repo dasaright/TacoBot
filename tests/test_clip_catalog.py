@@ -14,6 +14,19 @@ def files(folder):
 
 
 class ClipCatalogTests(unittest.TestCase):
+    def test_shared_default_persists_without_replacing_selected_label(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            for name in ('Empty','Selected'): (folder/f'{name}.ogg').write_bytes(b'audio')
+            found=files(folder); keys={path.stem:key for key,path in found.items()}
+            cfg={'clip_settings':{keys['Empty']:{'label':'','volume':-20},keys['Selected']:{'label':'Recording'}},'clip_labels':{'Shared':'#custom'}}
+            loaded,colors=catalog.load_folder(folder,found,cfg,default_label='Shared')
+            self.assertEqual(loaded[keys['Empty']],{'label':'Shared','volume':-20})
+            self.assertEqual(loaded[keys['Selected']]['label'],'Recording')
+            self.assertEqual(colors['Shared'],'#custom')
+            restored,_=catalog.load_folder(folder,found,{})
+            self.assertEqual(restored,loaded)
+
     def test_create_empty_folder_and_migrate_only_portable_settings(self):
         with tempfile.TemporaryDirectory() as directory:
             folder=Path(directory); catalog.load_folder(folder,{}, {})
