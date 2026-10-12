@@ -121,6 +121,22 @@ class QtDesktopTests(unittest.TestCase):
         self.assertFalse(w.thumbnail.isHidden())
         c.render_music({'current':None,'playlist':[]}); self.assertTrue(w.thumbnail.isHidden())
 
+    def test_record_button_state_and_updates_wait_for_recording(self):
+        c=self.controller; w=self.window
+        c.folder.set('saved clips')
+        with patch.object(c.recorder,'start') as start:
+            w.record.click(); start.assert_called_once_with('saved clips')
+        c.handle_event({'recorder_state':'recording','recording_device':'Speakers'})
+        self.assertEqual(w.record.text(),'Stop Recording'); self.assertTrue(w.record.isEnabled())
+        c.recorder.busy=True
+        with patch.object(c.recorder,'stop') as stop:
+            w.record.click(); stop.assert_called_once()
+        self.assertFalse(w.record.isEnabled())
+        with patch('relay_agent.main.RelayWindow.poll_updates') as updates:
+            c.poll_updates(); updates.assert_not_called()
+        c.recorder.busy=False; c.handle_event({'recorder_state':'idle'})
+        self.assertEqual(w.record.text(),'Record'); self.assertTrue(w.record.isEnabled())
+
     def test_fresh_desktop_scans_portable_folder_metadata(self):
         from relay_agent import clip_catalog, main as engine
         with tempfile.TemporaryDirectory() as directory:

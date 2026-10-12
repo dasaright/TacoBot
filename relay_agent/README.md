@@ -269,3 +269,7 @@ Selecting/scanning a local clips folder creates `tacobot-clips.json` in that fol
 In the music queue, single-click selects; double-click plays. Favorites also use double-click to add music.
 
 The window, Windows executable/taskbar, and running tray icon use `relay_agent/assets/taco.png` / `taco.ico`. The icon was generated with the built-in image-generation tool from the prompt: a single standalone taco, anime illustration with crisp outlines and cel shading, transparent background, no plate, no face, no text; a compact silhouette readable as a small Windows icon.
+
+### Record speaker audio
+
+In Soundboard, click **Record** to capture the Windows default playback device (speakers/headphones). Click **Stop Recording** to save an MP3 in the clips folder selected when recording started. The next unused `clipped soundboard (1).mp3`, `(2)`, etc. is chosen without overwriting existing clips. The clip list refreshes after saving. Capture and encoding run off the GUI thread and use disk instead of keeping a long recording in RAM. Closing the relay stops and saves an active recording before exit; updater installation waits while capture/encoding is active. No microphone or virtual-cable setup is required. All audio audible through that Windows playback output is captured.

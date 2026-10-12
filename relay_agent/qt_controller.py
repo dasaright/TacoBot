@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMenu, QFileDialog, QInputDialog, Q
 from . import main as engine
 from . import clip_catalog
 from .youtube_thumbnail import youtube_thumbnail
+from .clip_recorder import ClipRecorder
 from .qt_adapters import Value, Control, Text, Root, Tree
 
 
@@ -23,6 +24,7 @@ class Controller(engine.RelayWindow):
     def __init__(self, view, config, start_agent=True):
         self.view, self.config = view, config
         self.root = Root(view); self.agent = engine.RelayAgent(config)
+        self.recorder = ClipRecorder(engine.FFMPEG_PATH, self.agent.events); self.close_after_recording = False
         self.loop = asyncio.new_event_loop(); self.started = start_agent
         self.status = Value(getter=view.status.text,setter=view.status.setText)
         self.identity = Value(getter=view.identity.text,setter=view.identity.setText)
@@ -170,6 +172,21 @@ class Controller(engine.RelayWindow):
         folder=QFileDialog.getExistingDirectory(self.view,'Local clips folder',self.folder.get())
         if folder:
             self.config['mp3_folder']=folder; self.folder.set(folder); self.save(); self.refresh_files()
+
+    def toggle_recording(self):
+        if self.recorder.busy:
+            self.recorder.stop(); self.view.record.setEnabled(False); self.status.set('Saving recording…'); return
+        if not self.folder.get(): self.choose_folder()
+        if not self.folder.get(): return
+        try:
+            self.recorder.start(self.folder.get()); self.view.record.setEnabled(False)
+        except Exception as exc:
+            self.status.set('Could not record: '+str(exc))
+
+    def poll_updates(self):
+        # Neither a manual install nor auto-update may interrupt capture/encoding.
+        if self.recorder.busy: return
+        return super().poll_updates()
 
     def import_files(self,paths):
         if not self.folder.get():
@@ -341,6 +358,18 @@ class Controller(engine.RelayWindow):
         if self.started: self.poll_updates()
 
     def handle_event(self,event):
+        if 'recorder_state' in event:
+            state=event['recorder_state']; self.view.record.setText('Stop Recording' if state=='recording' else 'Record')
+            self.view.record.setEnabled(state in ('recording','idle'))
+            from .qt_desktop import icon
+            self.view.record.setIcon(icon('stop' if state=='recording' else 'record'))
+            if state=='recording': self.status.set('Recording speaker output: '+event.get('recording_device',''))
+            if state=='saving': self.status.set('Saving recording…')
+            if state=='idle' and self.close_after_recording: QTimer.singleShot(0,self.view.close)
+        if event.get('recording_error'): self.status.set('Could not record: '+event['recording_error'])
+        if event.get('recorded_clip'):
+            self.status.set('Saved '+Path(event['recorded_clip']).name)
+            if event.get('recording_folder')==self.folder.get(): self.refresh_files()
         if 'thumbnail_url' in event:
             url=event['thumbnail_url']; self.thumbnail_loading.discard(url)
             pixmap=QPixmap()

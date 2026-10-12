@@ -54,6 +54,8 @@ ICONS = {}
 def icon(name, color="#52d4ba"):
     key=(name,color)
     if key not in ICONS:
+        if name == 'record':
+            pixmap=QPixmap(128,128); pixmap.fill(Qt.GlobalColor.transparent); painter=QPainter(pixmap); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(QColor('#f27676')); painter.drawEllipse(24,24,80,80); painter.end(); ICONS[key]=QIcon(pixmap); return ICONS[key]
         image = engine.render_button_icon(name, 128, color).convert('RGBA')
         qimage = QImage(image.tobytes(), image.width, image.height, QImage.Format.Format_RGBA8888).copy()
         ICONS[key] = QIcon(QPixmap.fromImage(qimage))
@@ -317,7 +319,7 @@ class Desktop(QMainWindow):
         tools = QWidget(); bar = row(tools); bar.addWidget(button('Stop clips',lambda:self.controller.stop(),'stop'))
         bar.addWidget(QLabel('Search clips')); self.search = QLineEdit(); self.search.setClearButtonEnabled(True); self.search.setFixedWidth(190); self.search.setPlaceholderText('Name or label'); self.search.textChanged.connect(lambda:self.controller.render_clips()); bar.addWidget(self.search)
         self.clip_volume = self.volume(bar,'bot_clip_volume'); bar.addWidget(button('Refresh',lambda:self.controller.refresh_files(),'refresh')); bar.addWidget(button('Sync',lambda:self.controller.sync_shared(),'sync')); bar.addStretch(); bar.addWidget(button('Open folder',lambda:self.controller.choose_folder(),'folder')); area.addWidget(tools)
-        details = QWidget(); line = row(details); line.addStretch(); line.addWidget(QLabel('Click a clip to play · Right-click to manage')); self.folder = QLabel(self.config.get('mp3_folder','No local folder selected')); self.folder.setMaximumWidth(400); self.folder.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); line.addWidget(self.folder); area.addWidget(details)
+        details = QWidget(); line = row(details); self.record=button('Record',lambda:self.controller.toggle_recording(),'record'); self.record.setMinimumWidth(150); line.addWidget(self.record); line.addStretch(); line.addWidget(QLabel('Click a clip to play · Right-click to manage')); self.folder = QLabel(self.config.get('mp3_folder','No local folder selected')); self.folder.setMaximumWidth(400); self.folder.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred); line.addWidget(self.folder); area.addWidget(details)
         self.clips = ClipTable(); self.clips.setAcceptDrops(True); self.clips.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
         self.clip_model = ClipModel(self); self.clips.setModel(self.clip_model); self.clips.setItemDelegate(ClipDelegate(self)); self.clips.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows); self.clips.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.clips.setShowGrid(False); self.clips.setAlternatingRowColors(True); self.clips.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel); self.clips.verticalHeader().hide(); self.clips.verticalHeader().setDefaultSectionSize(25); self.clips.verticalHeader().setMinimumSectionSize(25)
@@ -362,6 +364,8 @@ class Desktop(QMainWindow):
         self.controller.import_files([url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]); event.acceptProposedAction()
 
     def closeEvent(self,event):
+        if self.controller.recorder.busy:
+            self.controller.close_after_recording=True; self.controller.recorder.stop(); self.status.set('Saving recording before closing…'); event.ignore(); return
         if not self.closing:
             self.closing = True; self.controller.shutdown()
             self.tray.hide()
