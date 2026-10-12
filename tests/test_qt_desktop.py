@@ -220,6 +220,19 @@ class QtDesktopTests(unittest.TestCase):
                 c.unshare_local('b')
             self.assertTrue(source.exists()); self.assertEqual((local/'clip.mp3').read_bytes(),b'audio'); c.agent.edit_clip_file.assert_not_awaited()
 
+    def test_edit_clip_opens_selected_local_or_shared_file(self):
+        c=self.controller; w=self.window
+        for key,origin in [('a','Local'),('b','Shared')]:
+            with patch.object(w.editor,'load_path') as load:
+                c.edit_clip(key)
+                self.assertEqual(w.pages.currentIndex(),3)
+                self.assertEqual(w.editor.files.currentData()[0],key)
+                load.assert_called_once_with(c.agent.local_files[key],key,origin)
+        w.editor.busy=True
+        with patch.object(w.editor,'load_path') as load:
+            c.edit_clip('a'); load.assert_not_called()
+        w.editor.busy=False
+
     def test_delete_removes_row_and_editor_choice_before_rescan(self):
         c=self.controller; w=self.window
         with patch.object(c,'refresh_files') as scan:

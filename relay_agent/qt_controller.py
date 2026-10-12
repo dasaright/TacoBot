@@ -311,6 +311,8 @@ class Controller(engine.RelayWindow):
         if not index.isValid(): return
         key=index.data(Qt.ItemDataRole.UserRole); self.view.clips.selectRow(index.row()); self.context_clip_id=key
         menu=QMenu(self.view); path=self.agent.local_files[key]; local=self.clip_origins.get(key)=='Local'
+        action=menu.addAction('Edit clip',lambda:self.edit_clip(key)); action.setEnabled(not self.view.editor.busy and key not in self.editing_clips)
+        menu.addSeparator()
         for text,delete in [('Share',False),('Share then del local',True)]:
             action=menu.addAction(text); action.setEnabled(local and not self.sync_running); action.triggered.connect(lambda checked=False,delete=delete:self.share_local(key,delete))
         if not local and self.config.get('shared_owner'):
@@ -320,6 +322,17 @@ class Controller(engine.RelayWindow):
         for name,color in engine.LABEL_COLORS.items():
             action=colors.addAction(name); action.setIcon(self.color_icon(color)); action.triggered.connect(lambda checked=False,color=color:self.label_color(label,color))
         menu.exec(self.view.clips.viewport().mapToGlobal(point))
+
+    def edit_clip(self,key):
+        path=self.agent.local_files.get(key)
+        if path is None or self.view.editor.busy: return
+        editor=self.view.editor
+        for n in range(editor.files.count()):
+            entry=editor.files.itemData(n)
+            if entry and entry[0]==key:
+                editor.files.setCurrentIndex(n); break
+        self.view.select_tab(3)
+        editor.load_path(path,key,self.clip_origins.get(key,'Local'))
 
     def color_icon(self,color):
         from PySide6.QtGui import QPixmap,QIcon
