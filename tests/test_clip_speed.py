@@ -4,10 +4,18 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
-from relay_agent.clip_speed import speed_percent, speed_factor, tempo_filter
+from relay_agent.clip_speed import speed_percent, speed_factor, tempo_filter, SPEED_PRESETS, preset_index
 
 
 class ClipSpeedTests(unittest.TestCase):
+    def test_exact_presets_and_migration(self):
+        expected = (1/3, .5, .75, 1, 1.5, 2, 3)
+        for index, (value, factor) in enumerate(zip(SPEED_PRESETS, expected)):
+            self.assertAlmostEqual(speed_factor(value), factor)
+            self.assertEqual(preset_index(value), index)
+        self.assertEqual(preset_index(-30), 2)
+        self.assertEqual(preset_index(0), 3)
+
     def test_speed_range_and_safe_filter_stages(self):
         for value,expected in [(-200,1/3),(-100,.5),(0,1),(100,2),(200,3)]:
             self.assertAlmostEqual(speed_factor(value),expected)

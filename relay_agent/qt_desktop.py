@@ -324,19 +324,19 @@ class Desktop(QMainWindow):
         tools = QWidget(); bar = row(tools); bar.addWidget(button('Stop clips',lambda:self.controller.stop(),'stop'))
         bar.addWidget(QLabel('Search clips')); self.search = QLineEdit(); self.search.setClearButtonEnabled(True); self.search.setFixedWidth(190); self.search.setPlaceholderText('Name or label'); self.search.textChanged.connect(lambda:self.controller.render_clips()); bar.addWidget(self.search)
         self.clip_volume = self.volume(bar,'bot_clip_volume'); bar.addWidget(button('Refresh',lambda:self.controller.refresh_files(),'refresh')); bar.addWidget(button('Sync',lambda:self.controller.sync_shared(),'sync'))
-        from .clip_speed import speed_percent, speed_factor
+        from .clip_speed import SPEED_PRESETS, SPEED_LABELS, preset_index
         bar.addWidget(QLabel('Speed'))
-        self.clip_speed=QSlider(Qt.Orientation.Horizontal); self.clip_speed.setRange(-200,200); self.clip_speed.setFixedWidth(105)
-        self.clip_speed.setValue(speed_percent(self.config.get('clip_speed',0)))
+        self.clip_speed=QSlider(Qt.Orientation.Horizontal); self.clip_speed.setRange(0,len(SPEED_PRESETS)-1); self.clip_speed.setSingleStep(1); self.clip_speed.setPageStep(1); self.clip_speed.setFixedWidth(105)
+        self.clip_speed.setValue(preset_index(self.config.get('clip_speed',0)))
         self.clip_speed_text=QLabel(); self.clip_speed_text.setFixedWidth(94)
         def speed_changed(value):
-            self.config['clip_speed']=value
-            self.clip_speed_text.setText(f'{value:+d}% · {speed_factor(value):.2f}×' if value else '0% · 1.00×')
+            self.config['clip_speed']=SPEED_PRESETS[value]
+            self.clip_speed_text.setText(SPEED_LABELS[value])
             if hasattr(self,'controller'): self.controller.save_later()
         speed_changed(self.clip_speed.value())
         self.clip_speed.valueChanged.connect(speed_changed)
         self.clip_speed.setToolTip('Speed for newly played clips. Double-click to reset. Pitch stays unchanged.')
-        self.clip_speed.mouseDoubleClickEvent=lambda event:self.clip_speed.setValue(0)
+        self.clip_speed.mouseDoubleClickEvent=lambda event:self.clip_speed.setValue(3)
         bar.addWidget(self.clip_speed); bar.addWidget(self.clip_speed_text); bar.addStretch(); bar.addWidget(button('Open folder',lambda:self.controller.choose_folder(),'folder')); area.addWidget(tools)
         details = QWidget(); line = row(details); self.record=button('Record',lambda:self.controller.toggle_recording(),'record'); self.record.setMinimumWidth(150); line.addWidget(self.record)
         playback_row=line

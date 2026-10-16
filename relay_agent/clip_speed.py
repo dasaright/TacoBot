@@ -3,7 +3,9 @@
 
 def speed_percent(value):
     try:
-        return max(-200, min(200, int(value)))
+        import math
+        value = float(value)
+        return max(-200, min(200, value)) if math.isfinite(value) else 0
     except (TypeError, ValueError, OverflowError):
         return 0
 
@@ -24,3 +26,12 @@ def tempo_filter(value):
         factor /= 2
     parts.append(f"atempo={factor:.8g}")
     return ",".join(parts)
+
+
+SPEED_PRESETS = (-200, -100, -100 / 3, 0, 50, 100, 200)
+SPEED_LABELS = ("⅓×", "½×", "¾×", "100%", "1.5×", "2×", "3×")
+
+
+def preset_index(value):
+    factor = speed_factor(value)
+    return min(range(len(SPEED_PRESETS)), key=lambda n: abs(speed_factor(SPEED_PRESETS[n]) - factor))
