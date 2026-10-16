@@ -98,13 +98,13 @@ class RoutingTests(unittest.TestCase):
 
 class DirectAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_direct_play_uses_normalization_and_slider_without_websocket(self):
-        agent = RelayAgent({'clip_settings': {'clip': {'volume': 45}}})
+        agent = RelayAgent({'clip_settings': {'clip': {'volume': 45}}, 'clip_speed': -100})
         agent.local_files = {'clip': Path('clip.wav')}
         agent.normalize_clip = AsyncMock(return_value=-8)
         agent.direct_audio = Mock()
         agent.send_json = AsyncMock()
         await agent.play_direct_clip('clip')
-        agent.direct_audio.play.assert_called_once_with('clip', Path('clip.wav'), -8, 45)
+        agent.direct_audio.play.assert_called_once_with('clip', Path('clip.wav'), -8, 45, -100)
         agent.send_json.assert_not_awaited()
         self.assertFalse(agent.direct_tasks)
 
