@@ -743,7 +743,7 @@ class RelayAgent:
             path = self.local_files[file_id]
             gain = await self.normalize_clip(path)
             adjustment = self.config.get("clip_settings", {}).get(file_id, {}).get("volume", 0)
-            self.direct_audio.play(file_id, path, gain, adjustment)
+            self.direct_audio.play(file_id, path, gain, adjustment, self.config.get("clip_speed", 0))
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -841,7 +841,11 @@ class RelayAgent:
             normalization_args = []
             if local_path is not None:
                 gain_db = await self.normalize_clip(local_path)
-                normalization_args = ["-af", f"volume={gain_db}dB"]
+                filters = f"volume={gain_db}dB"
+                if not url[6:].startswith("tts:"):
+                    from .clip_speed import tempo_filter
+                    filters += "," + tempo_filter(self.config.get("clip_speed", 0))
+                normalization_args = ["-af", filters]
             ffmpeg = await asyncio.create_subprocess_exec(
                 str(FFMPEG_PATH),
                 "-hide_banner",
