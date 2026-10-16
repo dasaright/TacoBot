@@ -53,13 +53,15 @@ def edit_shared_clip(config, path, new_name=None):
         raise
 
 
-def sync_clips(folder, config, extensions, validate):
+def sync_clips(folder, config, extensions, validate, collection='sharedclips'):
+    if collection not in {'sharedclips', 'ownerclips'}:
+        raise ValueError('Invalid clip collection.')
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     server = urlsplit(config['server_url'])
     if server.scheme not in ('wss', 'https'):
         raise ValueError('Shared sync requires a secure relay URL.')
-    base = 'https://' + server.netloc + '/sharedclips'
+    base = 'https://' + server.netloc + '/' + collection
     def request(name='', data=None):
         url = base + ('/' + quote(name, safe='') if name else '')
         req = Request(url, data=data, method='PUT' if data is not None else 'GET',
@@ -93,7 +95,11 @@ def sync_clips(folder, config, extensions, validate):
             continue
         if path.name in remote:
             if blob_sha(path.read_bytes()) != remote[path.name]['sha']:
-                conflicts.append(path.name)
+                if collection == 'ownerclips' and validate(path):
+                    request(path.name, path.read_bytes())
+                    uploaded += 1
+                else:
+                    conflicts.append(path.name)
             continue
         if validate(path):
             request(path.name, path.read_bytes())

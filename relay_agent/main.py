@@ -1961,6 +1961,7 @@ class RelayWindow:
         self.refresh_music()
 
     def sync_shared(self):
+        if hasattr(self, "sync_owner_clips"): self.sync_owner_clips()
         if self.sync_running or getattr(self, "editing_clips", set()):
             return
         self.sync_running = True

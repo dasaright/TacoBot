@@ -62,6 +62,8 @@ class Controller(engine.RelayWindow):
         self.poll_timer = QTimer(view); self.poll_timer.timeout.connect(self.poll); self.poll_timer.start(16)
         self.render_favorites()
         self.folder_watcher=QFileSystemWatcher(view); self.folder_watcher.directoryChanged.connect(self.library_directory_changed)
+        self.owner_sync_timer=QTimer(view); self.owner_sync_timer.setInterval(60000); self.owner_sync_timer.timeout.connect(self.sync_owner_clips)
+        if start_agent: self.owner_sync_timer.start()
         self.directory_signatures={}; self.library_watch_timer=QTimer(view); self.library_watch_timer.setSingleShot(True); self.library_watch_timer.setInterval(250); self.library_watch_timer.timeout.connect(self.refresh_files)
         if start_agent:
             threading.Thread(target=self.run_agent,daemon=True).start(); self.refresh_files()
@@ -288,6 +290,26 @@ class Controller(engine.RelayWindow):
             except Exception as exc: self.agent.events.put({'error':str(exc)})
         threading.Thread(target=worker,daemon=True).start()
 
+    def sync_owner_clips(self):
+        if not self.started or not self.config.get('shared_owner') or not self.agent.websocket:
+            return
+        if getattr(self,'owner_sync_running',False) or self.editing_clips:
+            return
+        folder=self.folder.get()
+        if not folder or Path(folder).resolve()==engine.SHARED_CLIPS_DIR.resolve():
+            return
+        self.owner_sync_running=True
+        config=dict(self.config)
+        def worker():
+            try:
+                from .shared_clips import sync_clips
+                up,down,conflicts=sync_clips(folder,config,engine.AUDIO_EXTENSIONS,engine.is_playable_audio,collection='ownerclips')
+                self.agent.events.put({'owner_sync_done':True,'owner_downloaded':down,
+                    'status':f'Owner clips synced: uploaded {up}, downloaded {down}.' + (' Skipped: ' + ', '.join(conflicts) if conflicts else '')})
+            except Exception as exc:
+                self.agent.events.put({'owner_sync_done':True,'error':engine.clean_error(exc)})
+        threading.Thread(target=worker,daemon=True).start()
+
     def play_clip(self,key):
         if key not in self.agent.local_files or key in self.editing_clips: return
         if not self.view.direct.isEnabled(): self.status.set('Wait for direct audio setup to finish.'); return
@@ -487,6 +509,10 @@ class Controller(engine.RelayWindow):
                 self.view.playback_status.setText(f'Actively recording · {seconds:.1f} / {self.view.lookback_seconds.value()} seconds buffered')
 
     def handle_event(self,event):
+        if event.get('relay_name'): self.sync_owner_clips()
+        if event.get('owner_sync_done'):
+            self.owner_sync_running=False
+            if event.get('owner_downloaded'): self.refresh_files()
         if 'lookback_state' in event:
             state=event['lookback_state']; self.view.save_playback.setEnabled(state=='ready' and self.view.lookback.isChecked() and not self.playback_recorder.saving)
             if state=='stopped' and self.view.lookback.isChecked() and not self.close_after_recording: self.lookback_changed(True)
@@ -639,6 +665,7 @@ class Controller(engine.RelayWindow):
         self.view.close()
 
     def shutdown(self):
+        self.owner_sync_timer.stop()
         self.library_watch_timer.stop()
         if self.folder_watcher.directories(): self.folder_watcher.removePaths(self.folder_watcher.directories())
         self.playback_recorder.stop()
