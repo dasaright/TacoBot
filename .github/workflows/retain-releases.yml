@@ -1,15 +1,15 @@
-name: Retain latest three music releases
+name: Archive older releases
 
 on:
-  push:
-    branches: [main]
-    paths: [".github/workflows/retain-releases.yml"]
-  release:
-    types: [published]
   workflow_run:
     workflows: ["Build Windows Relay"]
     types: [completed]
+  release:
+    types: [published]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/retain-releases.yml]
 
 permissions:
   contents: write
@@ -19,57 +19,60 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cleanup:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+  archive:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Keep the newest three published versions
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-
-          repo = os.environ["GH_REPO"]
-
-          def api(path):
-              return json.loads(subprocess.check_output(["gh", "api", path], text=True))
-
-          def published_versions():
-              releases = []
-              page = 1
-              while True:
-                  batch = api(f"repos/{repo}/releases?per_page=100&page={page}")
-                  releases.extend(
-                      release for release in batch
-                      if not release["draft"] and re.fullmatch(r"relay-\d+", release["tag_name"])
-                  )
-                  if len(batch) < 100:
-                      break
-                  page += 1
-              return sorted(
-                  releases,
-                  key=lambda release: int(release["tag_name"].split("-")[1]),
-                  reverse=True,
-              )
-
-          releases = published_versions()
-          keep = releases[:3]
-          print("Keeping:", ", ".join(release["tag_name"] for release in keep), flush=True)
-          for release in releases[3:]:
-              print("Deleting release and assets:", release["tag_name"], flush=True)
-              subprocess.run(
-                  ["gh", "api", "--method", "DELETE", f"repos/{repo}/releases/{release['id']}"],
-                  check=True,
-              )
-          remaining = published_versions()
-          if [release["id"] for release in remaining] != [release["id"] for release in keep]:
-              raise RuntimeError("Release retention verification failed")
-          print("Verified: only the newest three published versions remain.", flush=True)
-          PY
+      # GitHub has no archived release state. Drafts preserve notes, assets,
+      # and tags while removing old releases from the public release list.
+      # workflow_run also handles releases created with GITHUB_TOKEN, whose
+      # publication does not trigger another release-event workflow.
+      - name: Keep latest public and archive older releases as drafts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repo = context.repo;
+            let latest;
+            try {
+              ({ data: latest } = await github.rest.repos.getLatestRelease(repo));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              core.notice('No stable published release; nothing to archive.');
+              return;
+            }
+            if (!latest.assets.some(a => a.state === 'uploaded' &&
+                a.size > 0 && a.name === 'TacoBot-Windows.zip')) {
+              throw new Error('Latest release has no completed Windows ZIP; refusing to archive.');
+            }
+            const releases = await github.paginate(
+              github.rest.repos.listReleases, { ...repo, per_page: 100 }
+            );
+            const older = releases.filter(r =>
+              !r.draft && r.id !== latest.id &&
+              Date.parse(r.published_at) <= Date.parse(latest.published_at)
+            );
+            if (older.some(r => r.immutable)) {
+              throw new Error('An older release is immutable and cannot be converted to a draft.');
+            }
+            let count = 0;
+            for (const release of older) {
+              // Stop if another publication changes latest during this run.
+              const { data: current } = await github.rest.repos.getLatestRelease(repo);
+              if (current.id !== latest.id) {
+                throw new Error('Latest release changed; rerun to recompute the archive list.');
+              }
+              await github.rest.repos.updateRelease({
+                ...repo, release_id: release.id, draft: true
+              });
+              core.info('Archived as draft: ' + release.tag_name);
+              count++;
+            }
+            await core.summary
+              .addHeading('Release archive')
+              .addRaw('Kept public: ' + latest.tag_name + '\n')
+              .addRaw('Older releases preserved as drafts: ' + count + '\n')
+              .write();
