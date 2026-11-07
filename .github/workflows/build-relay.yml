@@ -49,7 +49,7 @@ jobs:
       - name: Verify public relay TLS on Windows
         run: >-
           python -c "import socket; from relay_agent.main import relay_ssl_context;
-          host='runsformingbot-production.up.railway.app';
+          host='gwtaco.duckdns.org';
           sock=socket.create_connection((host,443),timeout=20);
           tls=relay_ssl_context().wrap_socket(sock,server_hostname=host);
           print('TLS verified; certificate expires',tls.getpeercert()['notAfter']);
