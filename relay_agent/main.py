@@ -1072,6 +1072,7 @@ class RelayAgent:
                 "protocol": PROTOCOL_VERSION,
                 "token": self.config["relay_token"],
                 "name": self.config["relay_name"],
+                "relay_name": self.config["relay_name"],
             })
             raw_hello = await asyncio.wait_for(websocket.recv(), timeout=15)
             hello = json.loads(raw_hello)
