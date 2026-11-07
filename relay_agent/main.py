@@ -36,7 +36,7 @@ else:
 
 
 RELAY_BUILD = 0
-RELAY_URL = "wss://runsformingbot-production.up.railway.app/relay"
+RELAY_URL = "wss://gwtaco.duckdns.org/relay"
 PROTOCOL_VERSION = 1
 PCM_FRAME_BYTES = 3840
 MAX_TRACK_SECONDS = 6 * 60 * 60
