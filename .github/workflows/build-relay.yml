@@ -240,7 +240,7 @@ jobs:
                 @{ name = "Automatic updates"; value = "Verified"; inline = $true },
                 @{ name = "Download"; value = "[TacoBot-Windows.zip]($releaseUrl)"; inline = $false }
               )
-              footer = @{ text = "Build completed successfully • ${{ github.sha }}".Substring(0, 46) }
+              footer = @{ text = "GitHub Actions • commit ${{ github.sha }}" }
             })
           }
           $json = $payload | ConvertTo-Json -Depth 8
