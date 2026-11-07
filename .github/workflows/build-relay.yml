@@ -216,3 +216,33 @@ jobs:
           update=updater.find_update(RELAY_BUILD-1); assert update['build']==RELAY_BUILD;
           stage=updater.prepare_update(update); shutil.rmtree(stage);
           print('Public update download, checksum, and file layout verified')"
+
+ 
+      - name: Notify Discord that a new build is available
+        if: success() && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:DISCORD_WEBHOOK_URL)) {
+            throw "DISCORD_WEBHOOK_URL secret is missing"
+          }
+          $tag = "relay-${{ github.run_number }}"
+          $releaseUrl = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+          $payload = @{
+            embeds = @(@{
+              title = "TacoBot v1.${{ github.run_number }} is available"
+              url = $releaseUrl
+              description = "A new Windows relay build has been published."
+              color = 5763719
+              fields = @(
+                @{ name = "Build"; value = "${{ github.run_number }}"; inline = $true },
+                @{ name = "Automatic updates"; value = "Verified"; inline = $true },
+                @{ name = "Download"; value = "[TacoBot-Windows.zip]($releaseUrl)"; inline = $false }
+              )
+              footer = @{ text = "Build completed successfully • ${{ github.sha }}".Substring(0, 46) }
+            })
+          }
+          $json = $payload | ConvertTo-Json -Depth 8
+          Invoke-RestMethod -Uri $env:DISCORD_WEBHOOK_URL -Method Post -ContentType "application/json" -Body $json
+          Write-Host "Discord build notification sent"
