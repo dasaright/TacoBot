@@ -254,7 +254,7 @@ class Desktop(QMainWindow):
             tab = QPushButton(title); tab.setCheckable(True); tab.setFixedSize(155 if n == 0 else 140 if n == 1 else 88 if n==2 else 112, 44); tab.setIcon(icon(symbol)); tab.setIconSize(QSize(28,28)); tab.pressed.connect(lambda n=n:self.select_tab(n)); top.addWidget(tab); self.tabs.append(tab)
         top.addStretch()
         top.addWidget(button('Audio', lambda:self.controller.direct_audio_settings(), 'audio'))
-        self.direct = QCheckBox('Direct'); self.direct.toggled.connect(lambda value:self.controller.direct_changed(value)); top.addWidget(self.direct)
+        self.direct = QCheckBox('Direct'); self.direct.setToolTip('Enable optional local Direct Audio. Normal clip clicks still play through Discord.'); self.direct.toggled.connect(lambda value:self.controller.direct_changed(value)); top.addWidget(self.direct)
         self.auto = QCheckBox('Auto-update'); self.auto.setChecked(config.get('auto_update', True)); self.auto.toggled.connect(lambda value:self.controller.auto_changed(value)); top.addWidget(self.auto)
         self.check = button('Updates', lambda:self.controller.check_updates(True), 'check'); self.check.setToolTip('Check for updates'); top.addWidget(self.check)
         self.install = button('Install', lambda:self.controller.install_update_now(), 'download'); self.install.setEnabled(False); top.addWidget(self.install)
