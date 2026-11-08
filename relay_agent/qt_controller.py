@@ -261,6 +261,7 @@ class Controller(engine.RelayWindow):
     def release_editor_source(self,key,path):
         key=key or hashlib.sha256(str(Path(path).resolve()).encode()).hexdigest()
         async def release():
+            await self.agent.stop_soundboard_clips(key)
             await self.agent.stop_direct_clips(key)
             if self.agent.preload_path==path and self.agent.preload_task:
                 self.agent.preload_task.cancel(); await asyncio.gather(self.agent.preload_task,return_exceptions=True)
@@ -312,11 +313,18 @@ class Controller(engine.RelayWindow):
 
     def play_clip(self,key):
         if key not in self.agent.local_files or key in self.editing_clips: return
-        if not self.view.direct.isEnabled(): self.status.set('Wait for direct audio setup to finish.'); return
-        if self.config.get('direct_soundboard'):
-            asyncio.run_coroutine_threadsafe(self.agent.play_direct_clip(key),self.loop)
-        else:
-            self.send({'type':'local_play','guild_id':None,'file_id':key,'title':self.agent.local_files[key].name})
+        title=self.agent.local_files[key].name
+        self.status.set('Requesting Discord playback: '+title)
+        asyncio.run_coroutine_threadsafe(self.agent.play_soundboard_clip(key,None),self.loop)
+
+    def play_clip_direct(self,key):
+        if key not in self.agent.local_files or key in self.editing_clips: return
+        if not self.config.get('direct_soundboard'):
+            self.status.set('Enable and configure Direct audio to play clips locally.')
+            return
+        title=self.agent.local_files[key].name
+        self.status.set('Playing locally (Direct Audio): '+title)
+        asyncio.run_coroutine_threadsafe(self.agent.play_direct_clip(key),self.loop)
 
     def label_menu(self,key,index):
         self.view.clips.selectRow(index.row()); menu=QMenu(self.view)
@@ -335,6 +343,8 @@ class Controller(engine.RelayWindow):
         key=index.data(Qt.ItemDataRole.UserRole); self.view.clips.selectRow(index.row()); self.context_clip_id=key
         menu=QMenu(self.view); path=self.agent.local_files[key]; local=self.clip_origins.get(key)=='Local'
         action=menu.addAction('Edit clip',lambda:self.edit_clip(key)); action.setEnabled(not self.view.editor.busy and key not in self.editing_clips)
+        direct=menu.addAction('Play locally (Direct Audio)',lambda:self.play_clip_direct(key))
+        direct.setEnabled(bool(self.config.get('direct_soundboard')))
         menu.addSeparator()
         for text,delete in [('Share',False),('Share then del local',True)]:
             action=menu.addAction(text); action.setEnabled(local and not self.sync_running); action.triggered.connect(lambda checked=False,delete=delete:self.share_local(key,delete))
@@ -565,6 +575,7 @@ class Controller(engine.RelayWindow):
             if ok and token.strip(): self.loop.call_soon_threadsafe(self.agent.token_ready.set)
         if 'direct_ready' in event or 'direct_failed' in event:
             enabled=event.get('direct_ready',False); self.set_direct_check(enabled); self.config['direct_soundboard']=enabled; self.view.direct.setEnabled(True); self.save()
+            self.status.set('Direct Audio is available from a clip right-click menu; normal click uses Discord.' if enabled else 'Normal soundboard playback uses Discord through the bot.')
         if 'normalization_cache' in event: self.config['clip_normalization']=event['normalization_cache']; self.save_later()
         if event.get('update_checked'):
             self.update_check_running=False; self.view.check.setEnabled(True)
@@ -618,6 +629,20 @@ class Controller(engine.RelayWindow):
             if 'translated_text' in event: self.view.translation.setPlainText(event['translated_text']); self.translated_language=event['translated_language']; self.view.translated_play.setEnabled(True)
         if event.get('tts_done'): self.view.play_text_button.setEnabled(True)
         if 'music' in event: self.render_music(event['music'])
+        soundboard_state=event.get('soundboard_state')
+        if soundboard_state:
+            labels={
+                'requested':'Soundboard: requesting Discord playback…',
+                'accepted':'Soundboard: server accepted the clip.',
+                'decoding':'Soundboard: decoding clip…',
+                'streaming':'Soundboard: sending audio frames…',
+                'server-buffered':'Soundboard: audio buffered on server.',
+                'playing':'Soundboard: Discord output is consuming audio.',
+                'completed':'Soundboard: clip playback completed.',
+                'cancelled':'Soundboard: clip cancelled.',
+                'failed':'Soundboard: playback failed.',
+            }
+            self.status.set(labels.get(soundboard_state,'Soundboard: '+soundboard_state))
         error=event.get('error') or event.get('clip_edit_error') or event.get('share_error') or event.get('direct_failed')
         if error or event.get('status'): self.status.set(error or event['status'])
 
