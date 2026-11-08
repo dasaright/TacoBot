@@ -783,15 +783,6 @@ class RelayAgent:
             "title": title,
         })
         try:
-            gain_db = await self.normalize_clip(path)
-            filters = f"volume={gain_db}dB"
-            if not file_id.startswith("tts:"):
-                if __package__:
-                    from .clip_speed import tempo_filter
-                else:
-                    from clip_speed import tempo_filter
-                filters += "," + tempo_filter(self.config.get("clip_speed", 0))
-
             transport = SoundboardTransport(
                 self.config["server_url"],
                 self.config["relay_token"],
@@ -805,8 +796,8 @@ class RelayAgent:
                 title=title,
                 source_path=path,
                 ffmpeg_path=FFMPEG_PATH,
-                audio_filter=filters,
-                transform_frame=lambda frame: self.apply_stream_volume(frame, "local:" + file_id),
+                audio_filter="",
+                transform_frame=lambda frame: frame,
                 on_state=self.events.put,
             )
         except asyncio.CancelledError:
