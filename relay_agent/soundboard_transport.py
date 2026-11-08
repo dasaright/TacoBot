@@ -89,8 +89,6 @@ class SoundboardTransport:
         receiver_task = None
         messages: asyncio.Queue = asyncio.Queue()
         websocket = None
-        started = False
-        terminal = False
 
         async def receive_messages():
             try:
@@ -180,7 +178,6 @@ class SoundboardTransport:
                 credits = accepted.get("window")
                 if not isinstance(credits, int) or not 1 <= credits <= 64:
                     raise ConnectionError("The soundboard server returned an invalid send window.")
-                started = True
                 notify("accepted", {"guild_id": accepted.get("guild_id")})
                 receiver_task = asyncio.create_task(receive_messages())
 
@@ -244,15 +241,15 @@ class SoundboardTransport:
                     message = await next_message()
                     message_type = message.get("type")
                     if message_type == "completed":
-                        terminal = True
                         notify("completed", message)
                         return message
                     elif message_type == "cancelled":
-                        terminal = True
                         notify("cancelled")
                         return message
                     elif message_type in {"error", "connection_closed"}:
                         raise RuntimeError(str(message.get("error") or "The soundboard server disconnected."))
+                    else:
+                        handle_progress(message)
 
         except asyncio.CancelledError:
             # Leaving the WebSocket context ends the session; the gateway
