@@ -14,6 +14,7 @@ import threading
 import time
 import queue
 import hashlib
+import secrets
 import tkinter as tk
 from tkinter import filedialog, ttk, simpledialog, messagebox
 from pathlib import Path
@@ -25,12 +26,14 @@ if __package__:
     from .shared_clips import sync_clips, edit_shared_clip, check_share_target
     from .updater import find_update, prepare_update, launch_installer
     from .direct_audio import DirectAudio, audio_devices
+    from .soundboard_transport import SoundboardTransport
     from .translation import LocalTranslator, LANGUAGES
     from .tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 else:
     from shared_clips import sync_clips, edit_shared_clip, check_share_target
     from updater import find_update, prepare_update, launch_installer
     from direct_audio import DirectAudio, audio_devices
+    from soundboard_transport import SoundboardTransport
     from translation import LocalTranslator, LANGUAGES
     from tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 
@@ -637,6 +640,7 @@ class RelayAgent:
         self.preload_path = None
         self.clip_tasks = {}
         self.clip_file_ids = {}
+        self.soundboard_tasks = {}
         self.playback_gate = asyncio.Event()
         self.playback_gate.set()
         self.events = queue.Queue()
