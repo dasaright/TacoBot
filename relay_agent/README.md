@@ -35,10 +35,16 @@ Windows client uses the VPS endpoint configured in
 
 `wss://gwtaco.duckdns.org/relay`
 
+YouTube and legacy control traffic continue to use `/relay`. Soundboard
+clips use a separate `/soundboard` WebSocket, derived automatically from the
+configured URL. Both paths are served by the RunsForming listener on port
+8080 and must be proxied by Caddy at cutover. Do not expose the internal port
+directly to the internet.
+
 The bot owner manages relay authentication tokens on the VPS. Use `!token`
 in Discord to issue or replace a personal token; provide each relay user only
-their own token. The VPS relay endpoint is served through Caddy and forwarded
-to the RunsForming relay listener on port 8080. Use only the configured VPS relay URL; do not expose the internal port directly to the internet.
+their own token. The soundboard endpoint uses the same credential; no second
+token is needed.
 
 The relay makes an outbound encrypted WebSocket connection. Volunteers do not
 need to open router ports or configure port forwarding.
@@ -68,14 +74,17 @@ The relay opens a desktop window. Choose a folder to scan its audio files; the
 folder is remembered in relay-config.json. Empty or undecodable files are omitted.
 Use Refresh files after adding or removing files.
 
-Join a Discord voice channel; your personal token finds it automatically. A single click
-on an audio file plays it immediately as a soundboard clip over the current music.
-The music and queue are preserved. Multiple clips can overlap (up to eight).
-Stop clips stops only clips. `y!pause` pauses music; `y!resume` or `y!play`
-without a URL resumes it. Clips can play while music is paused. `y!stop` stops
-all audio and clears the music queue. Audio files remain on the PC: only decoded audio is
-sent to the VPS. Local controls require the approved Owner PC relay credential;
-other volunteer credentials continue to support YouTube requests.
+Join a Discord voice channel; your personal token resolves your voice channel.
+A normal click on a clip streams decoded PCM through the dedicated protocol-v2
+soundboard connection to Discord over the current music. The music and queue
+are preserved. Up to eight clips can overlap. Playback is reported only after
+the Discord output consumes a non-silent frame; completion is reported after
+the server drains the clip. Right-click an active clip and choose **Stop this
+clip** to cancel that session; **Stop clips** cancels every bot clip and any
+active local Direct Audio clips. `y!pause` pauses music; `y!resume` or `y!play` without
+a URL resumes it. Clips can play while music is paused. `y!stop` stops all
+audio and clears the music queue. Audio files remain on the PC; only decoded
+PCM is sent to the VPS.
 
 Bot/command changes continue to work without replacing this executable. This
 MP3 feature requires one executable upgrade from the original console version.
@@ -113,9 +122,11 @@ The Soundboard tab plays clips only when the filename is clicked.
 Stop all clips stops every active clip while preserving music. Clips do not
 post Now playing messages in Discord. The queue refreshes every two seconds.
 
-Music uses a half-second jitter buffer and absolute 20 ms frame deadlines
-to avoid accumulating Windows scheduling delays. Soundboard clips remain
-immediate; music re-buffers if its network stream stalls.
+Music keeps its existing 25-frame buffer and half-second startup delay, with
+absolute 20 ms frame deadlines to avoid accumulating Windows scheduling
+delays. Protocol-v2 soundboard sessions use a bounded frame window and a
+provisional three-frame (60 ms) initial cushion; it applies only before the
+first clip frame is consumed. Music re-buffers if its network stream stalls.
 
 ## Audio library and drag-and-drop
 
@@ -202,17 +213,33 @@ YouTube Music has saved favorites/playlists on the left and the shared Discord q
 
 Use Search clips / labels above the soundboard for instant case-insensitive filtering. Clear restores the complete list. Filtering never deletes files or stops audio. Canvas rows align below the actual Windows column header height, including after opening the soundboard from the music tab.
 
-## Play soundboard through your own Discord microphone
+## Optional local Direct Audio
 
-Check **Play soundboard directly instead of through bot** beside **Update automatically**. The choice and device selections are remembered. This mode affects soundboard clips only; YouTube music still uses the bot.
+The Direct checkbox enables the separate local audio feature. It no longer
+changes the normal clip-click destination: a normal click always plays through
+Discord using the VPS soundboard transport. To play locally through the
+virtual cable and speakers, right-click a clip and choose **Play locally
+(Direct Audio)**. This affects only that explicit local action; YouTube music
+and ordinary soundboard clicks still use the bot.
 
 First-time setup:
 1. Install [VB-CABLE](https://vb-audio.com/Cable/) and restart Windows if its installer requests it.
 2. Open **Direct audio settings**. Choose **CABLE Input** as the virtual microphone output, your speakers/headphones for monitoring, and your physical microphone for optional voice passthrough. The Windows WASAPI entries are preferred. Devices must support stereo output and 48 kHz; the microphone uses mono 48 kHz.
 3. In Discord **User Settings → Voice & Video**, choose **CABLE Output** as Input Device and your normal speakers/headphones as Output Device. If Discord suppresses clips, adjust its noise suppression and input sensitivity.
-4. Click clip filenames. Audio goes to the cable and speakers, without requesting bot playback or connecting the bot to voice. Your microphone is mixed into the cable only, so you do not hear your own microphone through the speakers. Existing normalization and clip sliders still apply.
+4. Right-click a clip and choose **Play locally (Direct Audio)**. Audio goes
+to the cable and speakers, without requesting bot playback or connecting the
+bot to voice. Your microphone is mixed into the cable only, so you do not
+hear your own microphone through the speakers. Existing normalization and
+clip sliders still apply.
 
-**Stop all clips** stops direct clips but keeps microphone passthrough active. Unchecking the box stops direct playback and microphone passthrough and restores bot playback for clips. When unchecking, switch Discord's Input Device back to your physical microphone. The relay cannot change Discord's device selection automatically. Direct mode requires the relay to remain open; closing it releases its audio devices. Auto-updates wait for direct clips to finish, while manual installation can stop them immediately.
+**Stop all clips** stops direct clips and bot soundboard sessions while
+keeping microphone passthrough active. Unchecking the Direct box closes the
+local audio route and microphone passthrough; it does not change the normal
+Discord playback route. When disabling Direct, switch Discord's Input Device
+back to your physical microphone. The relay cannot change Discord's device
+selection automatically. Direct Audio requires the relay to remain open;
+closing it releases its audio devices. Auto-updates wait for direct clips to
+finish, while manual installation can stop them immediately.
 
 ## Text to speech
 

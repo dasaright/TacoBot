@@ -14,6 +14,7 @@ import threading
 import time
 import queue
 import hashlib
+import secrets
 import tkinter as tk
 from tkinter import filedialog, ttk, simpledialog, messagebox
 from pathlib import Path
@@ -25,12 +26,14 @@ if __package__:
     from .shared_clips import sync_clips, edit_shared_clip, check_share_target
     from .updater import find_update, prepare_update, launch_installer
     from .direct_audio import DirectAudio, audio_devices
+    from .soundboard_transport import SoundboardTransport
     from .translation import LocalTranslator, LANGUAGES
     from .tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 else:
     from shared_clips import sync_clips, edit_shared_clip, check_share_target
     from updater import find_update, prepare_update, launch_installer
     from direct_audio import DirectAudio, audio_devices
+    from soundboard_transport import SoundboardTransport
     from translation import LocalTranslator, LANGUAGES
     from tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 
@@ -637,6 +640,7 @@ class RelayAgent:
         self.preload_path = None
         self.clip_tasks = {}
         self.clip_file_ids = {}
+        self.soundboard_tasks = {}
         self.playback_gate = asyncio.Event()
         self.playback_gate.set()
         self.events = queue.Queue()
@@ -757,6 +761,61 @@ class RelayAgent:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         await asyncio.to_thread(self.direct_audio.stop_file, file_id)
+
+    async def play_soundboard_clip(self, file_id, guild_id=None):
+        """Decode and send one local clip through the dedicated protocol-v2 gateway."""
+        task = asyncio.current_task()
+        if len(self.soundboard_tasks) >= 8:
+            self.events.put({"error": "Too many simultaneous soundboard clips."})
+            return
+        path = self.local_files.get(file_id)
+        if path is None or not path.is_file():
+            self.events.put({"error": "This clip is no longer available. Refresh the library."})
+            return
+
+        session_id = secrets.token_hex(16)
+        title = path.name
+        self.soundboard_tasks[task] = file_id
+        self.events.put({
+            "soundboard_state": "requested",
+            "session_id": session_id,
+            "file_id": file_id,
+            "title": title,
+        })
+        try:
+            transport = SoundboardTransport(
+                self.config["server_url"],
+                self.config["relay_token"],
+                self.config.get("relay_name", "Discord relay"),
+                relay_ssl_context(),
+            )
+            await transport.play_file(
+                session_id=session_id,
+                guild_id=str(guild_id) if guild_id is not None else None,
+                file_id=file_id,
+                title=title,
+                source_path=path,
+                ffmpeg_path=FFMPEG_PATH,
+                audio_filter="",
+                transform_frame=lambda frame: frame,
+                on_state=self.events.put,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.events.put({"error": "Soundboard playback failed: " + clean_error(exc)})
+        finally:
+            self.soundboard_tasks.pop(task, None)
+
+    async def stop_soundboard_clips(self, file_id=None):
+        tasks = [
+            task for task, key in list(self.soundboard_tasks.items())
+            if file_id is None or key == file_id
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def normalize_clip(self, path):
         key = str(path.resolve())
@@ -961,6 +1020,7 @@ class RelayAgent:
         return target
 
     async def edit_clip_file(self, file_id, path, new_name=None):
+        await self.stop_soundboard_clips(file_id)
         await self.stop_direct_clips(file_id)
         if self.preload_path == path and self.preload_task:
             self.preload_task.cancel()
@@ -1098,6 +1158,9 @@ class RelayAgent:
                 for task in list(self.clip_tasks.values()):
                     task.cancel()
                 await asyncio.gather(*list(self.clip_tasks.values()), return_exceptions=True)
+                for task in list(self.soundboard_tasks):
+                    task.cancel()
+                await asyncio.gather(*list(self.soundboard_tasks), return_exceptions=True)
                 if self.stream_task is not None:
                     self.stream_task.cancel()
                     await asyncio.gather(self.stream_task, return_exceptions=True)
@@ -1296,7 +1359,7 @@ class RelayWindow:
         tts_controls.pack(fill="x", pady=14)
         self.tts_play_button = ttk.Button(tts_controls, text="▶  Play text", style="Primary.TButton", command=self.play_text)
         self.tts_play_button.pack(side="left")
-        ttk.Button(tts_controls, text="🛑  Stop speech / clips", command=lambda: self.send({"type": "local_stop", "guild_id": None})).pack(side="left", padx=10)
+        ttk.Button(tts_controls, text="🛑  Stop speech / clips", command=self.stop).pack(side="left", padx=10)
         ttk.Label(tts_panel, text=f"Piper · English, Dutch, German, French, Bulgarian · Up to {MAX_TEXT} characters · Generated locally, no API fees").pack(anchor="w")
 
         translation_row = ttk.Frame(tts_panel)
@@ -1450,6 +1513,7 @@ class RelayWindow:
         self.clip_menu = themed_menu(root)
         self.clip_menu.add_command(label="Share", command=lambda: self.share_clip(False))
         self.clip_menu.add_command(label="Share then del local", command=lambda: self.share_clip(True))
+        self.clip_menu.add_command(label="Play locally (Direct Audio)", command=self.play_clip_direct)
         self.clip_menu.add_separator()
         self.clip_menu.add_command(label="Rename", command=self.rename_clip)
         self.clip_menu.add_command(label="Delete", command=self.delete_clip)
@@ -2349,6 +2413,8 @@ class RelayWindow:
             self.clip_menu.entryconfigure(action, state="normal" if can_share else "disabled")
         has_label = bool(self.clip_setting(file_id).get("label"))
         self.clip_menu.entryconfigure("Change Label Color", state="normal" if has_label else "disabled")
+        direct_ready = bool(self.config.get("direct_soundboard"))
+        self.clip_menu.entryconfigure("Play locally (Direct Audio)", state="normal" if direct_ready else "disabled")
         try:
             self.clip_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -2628,6 +2694,18 @@ class RelayWindow:
         guild_id = self.target_id()
         self.send({"type": "music_control", "guild_id": guild_id, "action": "select", "track_id": track_id})
 
+    def play_clip_direct(self):
+        file_id = self.context_clip_id
+        if not file_id or not self.config.get("direct_soundboard"):
+            self.status.set("Enable and configure Direct audio to play clips locally.")
+            return
+        path = self.agent.local_files.get(file_id)
+        if path is None or not path.is_file():
+            self.status.set("This clip is no longer available. Refresh the library.")
+            return
+        self.status.set("Playing locally (Direct Audio): " + path.name)
+        asyncio.run_coroutine_threadsafe(self.agent.play_direct_clip(file_id), self.loop)
+
     def clip_context_menu(self, event):
         self.clip_pressed_index = None
         file_id = self.listbox.identify_row(event.y)
@@ -2773,22 +2851,17 @@ class RelayWindow:
             return
         if not file_id or pressed != file_id or self.clip_column_at(event.x) != "name":
             return
-        if hasattr(self, "direct_checkbox") and self.direct_checkbox.instate(["disabled"]):
-            self.status.set("Wait for direct audio setup to finish.")
-            return
-        guild_id = None
-        self.status.set("Starting clip " + self.agent.local_files[file_id].name)
-        if self.config.get("direct_soundboard"):
-            asyncio.run_coroutine_threadsafe(self.agent.play_direct_clip(file_id), self.loop)
-            return
-        self.send({"type": "local_play", "guild_id": guild_id, "file_id": file_id,
-                   "title": self.agent.local_files[file_id].name})
+        guild_id = self.target_id()
+        title = self.agent.local_files[file_id].name
+        self.status.set("Requesting Discord playback: " + title)
+        asyncio.run_coroutine_threadsafe(
+            self.agent.play_soundboard_clip(file_id, guild_id), self.loop
+        )
 
     def stop(self):
-        if self.config.get("direct_soundboard"):
-            asyncio.run_coroutine_threadsafe(self.agent.stop_direct_clips(), self.loop)
-            return
         guild_id = self.target_id()
+        asyncio.run_coroutine_threadsafe(self.agent.stop_soundboard_clips(), self.loop)
+        asyncio.run_coroutine_threadsafe(self.agent.stop_direct_clips(), self.loop)
         self.send({"type": "local_stop", "guild_id": guild_id})
 
     def run_agent(self):
@@ -2810,7 +2883,7 @@ class RelayWindow:
                 self.save()
                 if event.get("direct_failed"):
                     messagebox.showerror("Direct audio unavailable", event["direct_failed"], parent=self.root)
-                self.status.set("Direct soundboard enabled. Use the virtual cable as Discord's microphone input." if enabled else "Soundboard playback uses the bot.")
+                self.status.set("Direct Audio is available from a clip's right-click menu; normal click uses Discord." if enabled else "Normal soundboard playback uses Discord through the bot.")
             if "normalization_cache" in event:
                 self.config["clip_normalization"] = event["normalization_cache"]
                 if getattr(self, "normalization_save_after", None) is None:
@@ -2928,6 +3001,23 @@ class RelayWindow:
                     self.music_status.set("Paused" if music["paused"] else ("Playing" if music["current"] else "No music playing"))
                     self.set_music_playing(bool(music["current"]) and not music["paused"])
                     self.previous_button.configure(state="normal" if music["has_previous"] else "disabled")
+            soundboard_state = event.get("soundboard_state")
+            if soundboard_state:
+                labels = {
+                    "requested": "Soundboard: requesting Discord playback…",
+                    "accepted": "Soundboard: server accepted the clip.",
+                    "decoding": "Soundboard: decoding clip…",
+                    "streaming": "Soundboard: sending audio frames…",
+                    "server-buffered": "Soundboard: audio buffered on server.",
+                    "playing": "Soundboard: Discord output is consuming audio.",
+                    "completed": "Soundboard: clip playback completed.",
+                    "cancelled": "Soundboard: clip cancelled.",
+                    "failed": "Soundboard: playback failed.",
+                }
+                if soundboard_state == "completed" and event.get("played") is False:
+                    self.status.set("Soundboard: session drained, but no non-silent PCM reached Discord output.")
+                else:
+                    self.status.set(labels.get(soundboard_state, "Soundboard: " + soundboard_state))
             self.status.set(event.get("error") or event.get("status") or self.status.get())
         if time.monotonic() >= self.next_music_refresh:
             self.next_music_refresh = time.monotonic() + 2

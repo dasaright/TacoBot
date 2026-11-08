@@ -84,15 +84,17 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(list(array('h', outputs[0].data)), [1000] * 1920)
         self.assertTrue(audio.events.empty())
 
-    def test_direct_click_never_sends_bot_request(self):
+    def test_normal_click_uses_discord_even_when_direct_audio_is_enabled(self):
         w = RelayWindow.__new__(RelayWindow)
         w.config = {'direct_soundboard': True}; w.status = Mock(); w.send = Mock()
         w.listbox = Mock(); w.listbox.identify_region.return_value = 'cell'
         w.listbox.identify_row.return_value = 'clip'; w.clip_pressed_index = 'clip'
         w.clip_column_at = Mock(return_value='name'); w.loop = Mock()
-        w.agent = SimpleNamespace(local_files={'clip': Path('clip.wav')}, play_direct_clip=Mock(return_value='pending'))
+        w.target_id = Mock(return_value=None)
+        w.agent = SimpleNamespace(local_files={'clip': Path('clip.wav')}, play_soundboard_clip=Mock(return_value='pending'))
         with patch('relay_agent.main.asyncio.run_coroutine_threadsafe') as schedule:
             w.play_selected(SimpleNamespace(widget=w.listbox, x=2, y=2))
+        w.agent.play_soundboard_clip.assert_called_once_with('clip', None)
         schedule.assert_called_once_with('pending', w.loop)
         w.send.assert_not_called()
 

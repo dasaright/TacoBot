@@ -9,7 +9,7 @@ on:
       - "tests/**"
       - ".github/workflows/build-relay.yml"
   push:
-    branches: [main]
+    branches: [main, rebuild/soundboard-audio]
     paths:
       - "relay_agent/**"
       - "tests/**"
@@ -100,6 +100,12 @@ jobs:
           $ffmpeg = Get-ChildItem "ffmpeg-build" -Recurse -Filter "ffmpeg.exe" |
             Select-Object -First 1
           Copy-Item $ffmpeg.FullName "dist/Files/ffmpeg.exe"
+
+      - name: Verify real FFmpeg soundboard transport
+        shell: pwsh
+        run: |
+          $env:TEST_FFMPEG_PATH = (Resolve-Path "dist/Files/ffmpeg.exe").Path
+          python -m unittest discover -s tests -p test_soundboard_ffmpeg.py -v
 
       - name: Verify editing an actively playing file releases its lock
         shell: pwsh
