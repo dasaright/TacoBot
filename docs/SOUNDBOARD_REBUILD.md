@@ -39,6 +39,10 @@ The server grants bounded credits/window capacity. The client must not send unbo
 - The existing normalization, FFmpeg volume filter, per-clip volume transform, and tempo filter are retained in the new send path. They still require Windows fixture and audible-output comparison tests.
 - Normal click uses Discord regardless of DirectAudio preference. DirectAudio is exposed as a separate right-click action.
 
+## Staging build
+
+The Windows relay workflow now builds this branch and uploads a private `TacoBot-Windows` Actions artifact. It does not publish a release or send a Discord notification from this branch. The coordinated VPS/Caddy test sequence and rollback boundary are documented in the RunsForming repository's [SOUNDBOARD_STAGING.md](https://github.com/dasaright/RunsForming/blob/rebuild/soundboard-audio/docs/SOUNDBOARD_STAGING.md).
+
 ## Tests
 
 Current CI coverage (green on the rebuild branch) verifies endpoint derivation, the exact binary header layout, session ID/sequence/payload fields, incomplete PCM rejection, and a full local WebSocket transport exchange using a stub FFmpeg source. The transport test confirms two correctly framed PCM packets are sent, server-buffered and playing notifications are handled, and the client waits for server-confirmed completion. The CI job also compiles the packaged desktop integration modules. The Qt click test source verifies the new transport is scheduled instead of legacy `local_play`, but the Qt GUI test suite is not currently run in CI.
