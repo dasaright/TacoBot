@@ -648,7 +648,10 @@ class Controller(engine.RelayWindow):
                 'cancelled':'Soundboard: clip cancelled.',
                 'failed':'Soundboard: playback failed.',
             }
-            self.status.set(labels.get(soundboard_state,'Soundboard: '+soundboard_state))
+            if soundboard_state == 'completed' and event.get('played') is False:
+                self.status.set('Soundboard: session drained, but no non-silent PCM reached Discord output.')
+            else:
+                self.status.set(labels.get(soundboard_state,'Soundboard: '+soundboard_state))
         error=event.get('error') or event.get('clip_edit_error') or event.get('share_error') or event.get('direct_failed')
         if error or event.get('status'): self.status.set(error or event['status'])
 
