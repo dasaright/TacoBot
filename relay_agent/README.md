@@ -38,8 +38,7 @@ Windows client uses the VPS endpoint configured in
 The bot owner manages relay authentication tokens on the VPS. Use `!token`
 in Discord to issue or replace a personal token; provide each relay user only
 their own token. The VPS relay endpoint is served through Caddy and forwarded
-to the RunsForming relay listener on port 8080. Do not configure a Railway
-domain or expose the internal port directly to the internet.
+to the RunsForming relay listener on port 8080. Use only the configured VPS relay URL; do not expose the internal port directly to the internet.
 
 The relay makes an outbound encrypted WebSocket connection. Volunteers do not
 need to open router ports or configure port forwarding.
@@ -61,7 +60,7 @@ runtime requirements change.
 The relay normally uses the PC's residential connection without an account.
 If a video requires authentication, set `cookies_file` in `relay-config.json`
 to a Netscape-format cookie file stored on that same PC. Never share a cookie
-file with the bot owner, Railway, or another relay host.
+file with the bot owner or another relay host.
 
 ## Soundboard playback
 
