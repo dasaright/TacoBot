@@ -54,11 +54,14 @@ class QtDesktopTests(unittest.TestCase):
         w=self.window; w.select_tab(1); self.app.processEvents()
         index=w.clip_model.index(0,0); rect=w.clips.visualRect(index)
         self.assertEqual(index.data(),w.clip_model.rows[0][1])
+        key=index.data(Qt.ItemDataRole.UserRole)
+        pending=object()
+        self.controller.agent.play_soundboard_clip=Mock(return_value=pending)
         with patch('relay_agent.qt_controller.asyncio.run_coroutine_threadsafe') as schedule:
             QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=rect.center())
-        self.assertEqual(schedule.call_count,1)
+        self.controller.agent.play_soundboard_clip.assert_called_once_with(key,None)
+        schedule.assert_called_once_with(pending,self.controller.loop)
         self.assertFalse(self.controller.send.called)
-        self.controller.agent.play_soundboard_clip.assert_not_called() if isinstance(self.controller.agent.play_soundboard_clip,Mock) else None
         self.controller.send.reset_mock()
         index=w.clip_model.index(0,1); rect=w.clips.visualRect(index)
         key=index.data(Qt.ItemDataRole.UserRole)
