@@ -1,8 +1,8 @@
 # TacoBot
 
-The relay lets the Railway-hosted bot play YouTube audio through a volunteer's
-Windows internet connection. The Discord bot token, database, permissions,
-queues, and commands remain on Railway.
+The Windows relay connects outbound to the RunsForming bot and relay server
+hosted on the ZapHosting VPS. It supplies YouTube and local soundboard audio;
+Discord voice playback, bot commands, queues, and server state run on the VPS.
 
 ## Install
 
@@ -27,23 +27,22 @@ Ask the bot owner for a relay token before completing setup.
 The program creates `relay-config.json` next to the executable. That file
 contains a secret relay token and must not be shared.
 
-## Bot-owner Railway setup
+## Bot-owner VPS setup
 
-1. Generate a public Railway domain for the existing bot service.
-2. Add `AUDIO_RELAY_TOKENS` as a JSON object. Each relay PC gets a unique,
-   revocable token, for example:
+The relay connects to the VPS over an outbound encrypted WebSocket. The
+Windows client uses the VPS endpoint configured in
+`relay_agent/main.py`:
 
-   ```json
-   {"Taco PC":"long-random-token","Volunteer PC":"another-random-token"}
-   ```
+`wss://gwtaco.duckdns.org/relay`
 
-3. Give each volunteer the WebSocket URL
-   `wss://YOUR-DOMAIN.up.railway.app/relay` and only their own token.
-4. Redeploy after changing the token list. The `/health` endpoint reports the
-   number of connected relays but never exposes their names or tokens.
+The bot owner manages relay authentication tokens on the VPS. Use `!token`
+in Discord to issue or replace a personal token; provide each relay user only
+their own token. The VPS relay endpoint is served through Caddy and forwarded
+to the RunsForming relay listener on port 8080. Do not configure a Railway
+domain or expose the internal port directly to the internet.
 
 The relay makes an outbound encrypted WebSocket connection. Volunteers do not
-need to open router ports, configure port forwarding, or run the Discord bot.
+need to open router ports or configure port forwarding.
 
 ## Stable update model
 
@@ -76,7 +75,7 @@ The music and queue are preserved. Multiple clips can overlap (up to eight).
 Stop clips stops only clips. `y!pause` pauses music; `y!resume` or `y!play`
 without a URL resumes it. Clips can play while music is paused. `y!stop` stops
 all audio and clears the music queue. Audio files remain on the PC: only decoded audio is
-sent to Railway. Local controls require the approved Owner PC relay credential;
+sent to the VPS. Local controls require the approved Owner PC relay credential;
 other volunteer credentials continue to support YouTube requests.
 
 Bot/command changes continue to work without replacing this executable. This
@@ -153,11 +152,11 @@ trigger a new executable build.
 
 The Soundboard tab lists your chosen local folder and the separate `sharedclips` folder beside the executable. Name sorts filenames; Shared toggles checked-first / unchecked-first. Earlier sort choices remain as tie-breakers. Sort priority and direction are saved in `relay-config.json` and survive refreshes, restarts, and updates. Click a filename to play. **Sync clips** uploads new files from `sharedclips` and downloads missing shared files. Local files are never uploaded. Put files into `sharedclips` to share them. Shared files are public in this repository. Sync adds files only; rename conflicts and keep clips under 20 MB. Updates preserve both folders.
 
-Bot administrator: configure `SHARED_CLIPS_GITHUB_TOKEN` on Railway with a fine-grained GitHub token restricted to `dasaright/TacoBot`, Contents read/write. Approved relay tokens authorize sync. The GitHub token stays on the bot and is never distributed in the executable.
+Bot administrator: configure `SHARED_CLIPS_GITHUB_TOKEN` on the VPS with a fine-grained GitHub token restricted to `dasaright/TacoBot`, Contents read/write. Approved relay tokens authorize sync. The GitHub token stays on the bot and is never distributed in the executable.
 
 ## Personal relay tokens and updates
 
-Use `!token` in Discord (server or DM) to receive a personal token privately. Each use replaces the old token and disconnects relays using it. Setup asks only for this token; the Railway URL is fixed automatically and the bot supplies your Discord username. Invalid/replaced tokens prompt for a new token. Join voice and click a clip to have the bot connect automatically to your channel. You can control audio only from your own voice channel.
+Use `!token` in Discord (server or DM) to receive a personal token privately. Each use replaces the old token and disconnects relays using it. Setup asks only for this token; the VPS relay URL is fixed automatically and the bot supplies your Discord username. Invalid/replaced tokens prompt for a new token. Join voice and click a clip to have the bot connect automatically to your channel. You can control audio only from your own voice channel.
 
 Automatic updates wait for actual audio running on this PC, not remote queued music. Manual checks install when downloaded; **Install update now** installs a pending update immediately, interrupting this relay's audio. Both clip folders and configuration are preserved.
 
