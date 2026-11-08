@@ -1029,6 +1029,7 @@ class RelayAgent:
         return target
 
     async def edit_clip_file(self, file_id, path, new_name=None):
+        await self.stop_soundboard_clips(file_id)
         await self.stop_direct_clips(file_id)
         if self.preload_path == path and self.preload_task:
             self.preload_task.cancel()
@@ -1166,6 +1167,9 @@ class RelayAgent:
                 for task in list(self.clip_tasks.values()):
                     task.cancel()
                 await asyncio.gather(*list(self.clip_tasks.values()), return_exceptions=True)
+                for task in list(self.soundboard_tasks):
+                    task.cancel()
+                await asyncio.gather(*list(self.soundboard_tasks), return_exceptions=True)
                 if self.stream_task is not None:
                     self.stream_task.cancel()
                     await asyncio.gather(self.stream_task, return_exceptions=True)
