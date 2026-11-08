@@ -251,7 +251,7 @@ class SoundboardTransport:
                         raise RuntimeError(str(message.get("error") or "The soundboard server disconnected."))
 
         except asyncio.CancelledError:
-            if websocket is not None and started and not websocket.closed:
+            if websocket is not None and started:
                 try:
                     await websocket.send(json.dumps({"type": "cancel", "session_id": session_id}))
                 except Exception:
