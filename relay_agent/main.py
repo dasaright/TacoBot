@@ -3023,7 +3023,10 @@ class RelayWindow:
                     "cancelled": "Soundboard: clip cancelled.",
                     "failed": "Soundboard: playback failed.",
                 }
-                self.status.set(labels.get(soundboard_state, "Soundboard: " + soundboard_state))
+                if soundboard_state == "completed" and event.get("played") is False:
+                    self.status.set("Soundboard: session drained, but no non-silent PCM reached Discord output.")
+                else:
+                    self.status.set(labels.get(soundboard_state, "Soundboard: " + soundboard_state))
             self.status.set(event.get("error") or event.get("status") or self.status.get())
         if time.monotonic() >= self.next_music_refresh:
             self.next_music_refresh = time.monotonic() + 2
