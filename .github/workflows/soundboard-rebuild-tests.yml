@@ -1,0 +1,22 @@
+name: Soundboard rebuild tests
+
+on:
+  push:
+    branches:
+      - rebuild/soundboard-audio
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  soundboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependency
+        run: python -m pip install websockets==15.0.1
+      - name: Run protocol-v2 transport tests
+        run: python -m unittest discover -s tests -p "test_soundboard_transport.py" -v
