@@ -185,18 +185,24 @@ class SoundboardTransport:
                 receiver_task = asyncio.create_task(receive_messages())
 
                 creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-                process = await asyncio.create_subprocess_exec(
+                ffmpeg_args = [
                     str(ffmpeg_path),
                     "-hide_banner",
                     "-loglevel", "error",
                     "-threads", "1",
                     "-i", str(source_path),
                     "-vn",
-                    "-af", audio_filter,
+                ]
+                if audio_filter:
+                    ffmpeg_args.extend(["-af", audio_filter])
+                ffmpeg_args.extend([
                     "-f", "s16le",
                     "-ar", "48000",
                     "-ac", "2",
                     "pipe:1",
+                ])
+                process = await asyncio.create_subprocess_exec(
+                    *ffmpeg_args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     creationflags=creationflags,
