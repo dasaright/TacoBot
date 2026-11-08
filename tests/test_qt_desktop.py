@@ -50,12 +50,15 @@ class QtDesktopTests(unittest.TestCase):
         self.assertEqual(self.saved['clip_sort_keys'][0],['shared',True])
         self.assertEqual(self.saved['clip_settings']['a'],{'label':'Memes','volume':20})
 
-    def test_clip_click_only_name_and_slider_does_not_play(self):
+    def test_clip_click_only_name_uses_soundboard_transport_and_slider_does_not_play(self):
         w=self.window; w.select_tab(1); self.app.processEvents()
         index=w.clip_model.index(0,0); rect=w.clips.visualRect(index)
         self.assertEqual(index.data(),w.clip_model.rows[0][1])
-        QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=rect.center())
-        self.assertEqual(self.controller.send.call_args.args[0]['type'],'local_play')
+        with patch('relay_agent.qt_controller.asyncio.run_coroutine_threadsafe') as schedule:
+            QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=rect.center())
+        self.assertEqual(schedule.call_count,1)
+        self.assertFalse(self.controller.send.called)
+        self.controller.agent.play_soundboard_clip.assert_not_called() if isinstance(self.controller.agent.play_soundboard_clip,Mock) else None
         self.controller.send.reset_mock()
         index=w.clip_model.index(0,1); rect=w.clips.visualRect(index)
         key=index.data(Qt.ItemDataRole.UserRole)
