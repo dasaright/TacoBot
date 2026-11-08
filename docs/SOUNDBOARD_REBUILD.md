@@ -41,11 +41,11 @@ The server grants bounded credits/window capacity. The client must not send unbo
 
 ## Tests
 
-Current CI coverage (green on the rebuild branch) verifies endpoint derivation, the exact binary header layout, session ID/sequence/payload fields, and incomplete PCM rejection. The Qt click test verifies that a clip click schedules the new transport and does not send legacy `local_play`.
+Current CI coverage (green on the rebuild branch) verifies endpoint derivation, the exact binary header layout, session ID/sequence/payload fields, incomplete PCM rejection, and a full local WebSocket transport exchange using a stub FFmpeg source. The transport test confirms two correctly framed PCM packets are sent, server-buffered and playing notifications are handled, and the client waits for server-confirmed completion. The CI job also compiles the packaged desktop integration modules. The Qt click test source verifies the new transport is scheduled instead of legacy `local_play`, but the Qt GUI test suite is not currently run in CI.
 
 Still required before cutover:
-- FFmpeg decode success/failure, short clip and early EOF behavior, process cancellation.
+- Real FFmpeg decode success/failure, short clip and early EOF behavior, process cancellation.
 - Backpressure/credit behavior against a real or simulated slow server.
-- Per-session and stop-all cancellation, WebSocket disconnect behavior, and server drain.
+- Per-session and stop-all cancellation, WebSocket disconnect behavior, and server drain under load.
 - Qt status state handling and Windows packaged-app smoke test.
 - End-to-end test using the Windows client and test gateway; confirm audible Discord playback with a listener.
