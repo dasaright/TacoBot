@@ -41,15 +41,16 @@ The server grants bounded credits/window capacity. The client must not send unbo
 
 ## Staging build
 
-The Windows relay workflow now builds this branch and uploads a private `TacoBot-Windows` Actions artifact. It does not publish a release or send a Discord notification from this branch. The coordinated VPS/Caddy test sequence and rollback boundary are documented in the RunsForming repository's [SOUNDBOARD_STAGING.md](https://github.com/dasaright/RunsForming/blob/rebuild/soundboard-audio/docs/SOUNDBOARD_STAGING.md).
+The Windows relay workflow successfully built and uploaded the branch artifact in [Build Windows Relay run #101](https://github.com/dasaright/TacoBot/actions/runs/42434864991). The downloaded bundle contains `TacoBot.exe`, `Files/ffmpeg.exe`, `Files/yt-dlp.exe`, and the README. The run passed Qt desktop initialization, the full relay/installer test suite, real FFmpeg soundboard streaming, the frozen executable self-test, and the frozen installer/restart test. This is a branch Actions artifact only; it did not publish a GitHub release, change the public auto-update feed, or send a Discord notification.
+
+The coordinated VPS/Caddy test sequence and rollback boundary are documented in the RunsForming repository's [SOUNDBOARD_STAGING.md](https://github.com/dasaright/RunsForming/blob/rebuild/soundboard-audio/docs/SOUNDBOARD_STAGING.md). Do not run this client against the public relay until the server branch and Caddy `/soundboard` route have been staged.
 
 ## Tests
 
-Current CI coverage (green on the rebuild branch) verifies endpoint derivation, the exact binary header layout, session ID/sequence/payload fields, incomplete PCM rejection, and a full local WebSocket transport exchange using a stub FFmpeg source. The transport test confirms two correctly framed PCM packets are sent, server-buffered and playing notifications are handled, and the client waits for server-confirmed completion. The CI job also compiles the packaged desktop integration modules. The Qt click test source verifies the new transport is scheduled instead of legacy `local_play`, but the Qt GUI test suite is not currently run in CI.
+Current CI coverage (green on the rebuild branch) verifies endpoint derivation, the exact binary header layout, session ID/sequence/payload fields, incomplete PCM rejection, and a full local WebSocket transport exchange using a stub FFmpeg source. The Windows build also runs the real `SoundboardTransport` against a local WebSocket server using the downloaded FFmpeg executable and a generated one-second WAV; it validates PCM frame sequencing, payload size, server-buffered/playing events, and server-confirmed completion. The full Windows relay test suite and Qt desktop smoke test passed, and the frozen executable and updater/restart checks passed.
 
 Still required before cutover:
-- Real FFmpeg decode success/failure, short clip and early EOF behavior, process cancellation.
-- Backpressure/credit behavior against a real or simulated slow server.
-- Per-session and stop-all cancellation, WebSocket disconnect behavior, and server drain under load.
-- Qt status state handling and Windows packaged-app smoke test.
-- End-to-end test using the Windows client and test gateway; confirm audible Discord playback with a listener.
+- Real FFmpeg decode failure, short/empty clip, early EOF, and process-cancellation edge cases.
+- Backpressure/credit behavior against a deliberately slow server over longer clips.
+- Per-session and stop-all client cancellation under relay disconnect and repeated-start/stop races.
+- End-to-end test using the Windows client and staged gateway; confirm audible Discord playback with a listener.
