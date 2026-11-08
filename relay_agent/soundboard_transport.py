@@ -114,6 +114,8 @@ class SoundboardTransport:
             except asyncio.TimeoutError as exc:
                 raise TimeoutError("The soundboard server stopped responding.") from exc
 
+        credits = 0
+
         def notify(state, details=None):
             event = {
                 "soundboard_state": state,
@@ -124,6 +126,24 @@ class SoundboardTransport:
             if details:
                 event.update(details)
             on_state(event)
+
+        def handle_progress(message):
+            nonlocal credits
+            message_type = message.get("type")
+            if message_type == "credit":
+                amount = message.get("frames")
+                if isinstance(amount, int) and amount > 0:
+                    credits += amount
+            elif message_type == "server_buffered":
+                notify("server-buffered", message)
+            elif message_type == "playing":
+                notify("playing", message)
+            elif message_type == "cancelled":
+                raise asyncio.CancelledError
+            elif message_type in {"error", "connection_closed"}:
+                raise RuntimeError(str(message.get("error") or "The soundboard server disconnected."))
+            elif message_type == "completed":
+                raise ConnectionError("The server completed the session before the client sent end-of-stream.")
 
         try:
             async with connect(
@@ -195,19 +215,10 @@ class SoundboardTransport:
                             break
                         pcm = exc.partial + bytes(PCM_FRAME_BYTES - len(exc.partial))
 
+                    while not messages.empty():
+                        handle_progress(messages.get_nowait())
                     while credits <= 0:
-                        message = await next_message()
-                        message_type = message.get("type")
-                        if message_type == "credit":
-                            credits += int(message.get("frames") or 0)
-                        elif message_type == "server_buffered":
-                            notify("server-buffered", message)
-                        elif message_type == "playing":
-                            notify("playing", message)
-                        elif message_type == "cancelled":
-                            raise asyncio.CancelledError
-                        elif message_type in {"error", "connection_closed"}:
-                            raise RuntimeError(str(message.get("error") or "The soundboard server disconnected."))
+                        handle_progress(await next_message())
 
                     now = asyncio.get_running_loop().time()
                     await asyncio.sleep(max(0, next_frame_at - now))
@@ -232,13 +243,7 @@ class SoundboardTransport:
                 while True:
                     message = await next_message()
                     message_type = message.get("type")
-                    if message_type == "credit":
-                        credits += int(message.get("frames") or 0)
-                    elif message_type == "server_buffered":
-                        notify("server-buffered", message)
-                    elif message_type == "playing":
-                        notify("playing", message)
-                    elif message_type == "completed":
+                    if message_type == "completed":
                         terminal = True
                         notify("completed", message)
                         return message
@@ -250,11 +255,8 @@ class SoundboardTransport:
                         raise RuntimeError(str(message.get("error") or "The soundboard server disconnected."))
 
         except asyncio.CancelledError:
-            if websocket is not None and started:
-                try:
-                    await websocket.send(json.dumps({"type": "cancel", "session_id": session_id}))
-                except Exception:
-                    pass
+            # Leaving the WebSocket context ends the session; the gateway
+            # treats disconnect as cancellation and discards its PCM queue.
             notify("cancelled")
             raise
         except Exception as exc:
@@ -263,7 +265,10 @@ class SoundboardTransport:
         finally:
             if process is not None:
                 if process.returncode is None:
-                    process.kill()
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
                 try:
                     await asyncio.wait_for(process.wait(), timeout=3)
                 except (asyncio.TimeoutError, ProcessLookupError):
@@ -274,8 +279,3 @@ class SoundboardTransport:
             if receiver_task is not None:
                 receiver_task.cancel()
                 await asyncio.gather(receiver_task, return_exceptions=True)
-            if websocket is not None and started and not terminal:
-                try:
-                    await websocket.send(json.dumps({"type": "cancel", "session_id": session_id}))
-                except Exception:
-                    pass
