@@ -348,11 +348,7 @@ class Controller(engine.RelayWindow):
         key=index.data(Qt.ItemDataRole.UserRole); self.view.clips.selectRow(index.row()); self.context_clip_id=key
         menu=QMenu(self.view); path=self.agent.local_files[key]; local=self.clip_origins.get(key)=='Local'
         action=menu.addAction('Edit clip',lambda:self.edit_clip(key)); action.setEnabled(not self.view.editor.busy and key not in self.editing_clips)
-        stop=menu.addAction('Stop this clip',lambda:self.stop_clip(key))
-        stop.setEnabled(
-            key in self.agent.soundboard_tasks.values()
-            or key in self.agent.direct_tasks.values()
-        )
+        menu.addAction('Stop this clip',lambda:self.stop_clip(key))
         direct=menu.addAction('Play locally (Direct Audio)',lambda:self.play_clip_direct(key))
         direct.setEnabled(bool(self.config.get('direct_soundboard')))
         menu.addSeparator()
