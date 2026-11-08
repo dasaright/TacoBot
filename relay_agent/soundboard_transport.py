@@ -23,6 +23,7 @@ PCM_FRAME_BYTES = 3840
 FRAME_HEADER = struct.Struct("!4sB16sIH")
 FRAME_SECONDS = 0.020
 MAX_WEBSOCKET_MESSAGE = 64 * 1024
+SESSION_ACCEPT_TIMEOUT = 45
 SESSION_DRAIN_TIMEOUT = 45
 
 
@@ -170,7 +171,9 @@ class SoundboardTransport:
                     "file_id": file_id,
                     "title": title[:120],
                 }))
-                accepted = json.loads(await asyncio.wait_for(websocket.recv(), timeout=15))
+                accepted = json.loads(
+                    await asyncio.wait_for(websocket.recv(), timeout=SESSION_ACCEPT_TIMEOUT)
+                )
                 if accepted.get("type") == "error":
                     raise RuntimeError(str(accepted.get("error") or "The server rejected this clip."))
                 if accepted.get("type") != "accepted" or accepted.get("session_id") != session_id:
