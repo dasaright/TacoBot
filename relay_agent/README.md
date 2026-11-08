@@ -79,8 +79,9 @@ A normal click on a clip streams decoded PCM through the dedicated protocol-v2
 soundboard connection to Discord over the current music. The music and queue
 are preserved. Up to eight clips can overlap. Playback is reported only after
 the Discord output consumes a non-silent frame; completion is reported after
-the server drains the clip. Stop clips cancels bot clips and any active local
-Direct Audio clips. `y!pause` pauses music; `y!resume` or `y!play` without
+the server drains the clip. Right-click an active clip and choose **Stop this
+clip** to cancel that session; **Stop clips** cancels every bot clip and any
+active local Direct Audio clips. `y!pause` pauses music; `y!resume` or `y!play` without
 a URL resumes it. Clips can play while music is paused. `y!stop` stops all
 audio and clears the music queue. Audio files remain on the PC; only decoded
 PCM is sent to the VPS.
