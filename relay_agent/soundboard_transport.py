@@ -279,7 +279,7 @@ class SoundboardTransport:
             if receiver_task is not None:
                 receiver_task.cancel()
                 await asyncio.gather(receiver_task, return_exceptions=True)
-            if websocket is not None and started and not terminal and not websocket.closed:
+            if websocket is not None and started and not terminal:
                 try:
                     await websocket.send(json.dumps({"type": "cancel", "session_id": session_id}))
                 except Exception:
