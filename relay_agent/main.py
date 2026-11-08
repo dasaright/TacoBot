@@ -762,6 +762,70 @@ class RelayAgent:
         await asyncio.gather(*tasks, return_exceptions=True)
         await asyncio.to_thread(self.direct_audio.stop_file, file_id)
 
+    async def play_soundboard_clip(self, file_id, guild_id=None):
+        """Decode and send one local clip through the dedicated protocol-v2 gateway."""
+        task = asyncio.current_task()
+        if len(self.soundboard_tasks) >= 8:
+            self.events.put({"error": "Too many simultaneous soundboard clips."})
+            return
+        path = self.local_files.get(file_id)
+        if path is None or not path.is_file():
+            self.events.put({"error": "This clip is no longer available. Refresh the library."})
+            return
+
+        session_id = secrets.token_hex(16)
+        title = path.name
+        self.soundboard_tasks[task] = file_id
+        self.events.put({
+            "soundboard_state": "requested",
+            "session_id": session_id,
+            "file_id": file_id,
+            "title": title,
+        })
+        try:
+            gain_db = await self.normalize_clip(path)
+            filters = f"volume={gain_db}dB"
+            if not file_id.startswith("tts:"):
+                if __package__:
+                    from .clip_speed import tempo_filter
+                else:
+                    from clip_speed import tempo_filter
+                filters += "," + tempo_filter(self.config.get("clip_speed", 0))
+
+            transport = SoundboardTransport(
+                self.config["server_url"],
+                self.config["relay_token"],
+                self.config.get("relay_name", "Discord relay"),
+                relay_ssl_context(),
+            )
+            await transport.play_file(
+                session_id=session_id,
+                guild_id=str(guild_id) if guild_id is not None else None,
+                file_id=file_id,
+                title=title,
+                source_path=path,
+                ffmpeg_path=FFMPEG_PATH,
+                audio_filter=filters,
+                transform_frame=lambda frame: self.apply_stream_volume(frame, "local:" + file_id),
+                on_state=self.events.put,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.events.put({"error": "Soundboard playback failed: " + clean_error(exc)})
+        finally:
+            self.soundboard_tasks.pop(task, None)
+
+    async def stop_soundboard_clips(self, file_id=None):
+        tasks = [
+            task for task, key in list(self.soundboard_tasks.items())
+            if file_id is None or key == file_id
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def normalize_clip(self, path):
         key = str(path.resolve())
         async with self.normalization_locks.setdefault(key, asyncio.Lock()):
