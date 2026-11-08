@@ -1327,6 +1327,7 @@ class RelayWindow:
         self.direct_checkbox = ttk.Checkbutton(tabs_bar,
             text="Direct", variable=self.direct_mode,
             command=self.toggle_direct_mode)
+        self.direct_checkbox.configure(takefocus=False)
         self.direct_checkbox.pack(side="right", anchor="center", padx=(6, 0))
         ttk.Button(tabs_bar, text="Audio ▾", style="Compact.TButton", command=self.direct_audio_settings).pack(side="right", anchor="center", padx=(6, 0))
         left, right = ttk.Frame(self.notebook, padding=(0, 18)), ttk.Frame(self.notebook, padding=0)
