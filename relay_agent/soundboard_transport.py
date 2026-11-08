@@ -229,7 +229,6 @@ class SoundboardTransport:
                     raise RuntimeError(stderr_text or "FFmpeg could not decode this clip.")
 
                 await websocket.send(json.dumps({"type": "end", "session_id": session_id}))
-                notify("server-buffered", {"frames_sent": sequence})
                 while True:
                     message = await next_message()
                     message_type = message.get("type")
@@ -269,10 +268,6 @@ class SoundboardTransport:
                     await asyncio.wait_for(process.wait(), timeout=3)
                 except (asyncio.TimeoutError, ProcessLookupError):
                     pass
-                if process.stdout:
-                    process.stdout.close()
-                if process.stderr:
-                    process.stderr.close()
             if stderr_task is not None:
                 stderr_task.cancel()
                 await asyncio.gather(stderr_task, return_exceptions=True)
