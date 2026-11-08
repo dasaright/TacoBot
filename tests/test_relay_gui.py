@@ -23,9 +23,11 @@ class ClipClickTests(unittest.TestCase):
         window.destination.current.return_value = 0
         window.targets = [{'id':'1'}]
         window.config = {}
-        window.agent = SimpleNamespace(local_files={'clip': Path('clip.mp3')})
+        window.agent = SimpleNamespace(local_files={'clip': Path('clip.mp3')}, play_soundboard_clip=Mock(return_value='pending'))
         window.status = Mock()
         window.send = Mock()
+        window.target_id = Mock(return_value=None)
+        window.loop = Mock()
         return window
 
     def test_release_from_drag_drop_does_not_play_clip(self):
@@ -51,10 +53,14 @@ class ClipClickTests(unittest.TestCase):
         window.play_selected(SimpleNamespace(widget=Mock(), x=30, y=10))
         window.send.assert_not_called()
 
-    def test_file_row_click_plays_exact_file(self):
+    def test_file_row_click_starts_exact_file_through_soundboard_transport(self):
+        from unittest.mock import patch
         window = self.window()
-        window.play_selected(SimpleNamespace(widget=window.listbox, x=30, y=10))
-        window.send.assert_called_once_with({'type': 'local_play', 'guild_id': None, 'file_id': 'clip', 'title': 'clip.mp3'})
+        with patch('relay_agent.main.asyncio.run_coroutine_threadsafe') as schedule:
+            window.play_selected(SimpleNamespace(widget=window.listbox, x=30, y=10))
+        window.agent.play_soundboard_clip.assert_called_once_with('clip', None)
+        schedule.assert_called_once_with('pending', window.loop)
+        window.send.assert_not_called()
 
 
 class SortingTests(unittest.TestCase):
@@ -162,8 +168,11 @@ class HeaderDragTests(unittest.TestCase):
         window.send.assert_not_called()
         window.clip_pressed_index = 'clip'
         window.listbox.identify_column.return_value = '#4'
-        window.play_selected(SimpleNamespace(widget=window.listbox,x=30,y=10))
-        window.send.assert_called_once()
+        from unittest.mock import patch
+        with patch('relay_agent.main.asyncio.run_coroutine_threadsafe') as schedule:
+            window.play_selected(SimpleNamespace(widget=window.listbox,x=30,y=10))
+        window.agent.play_soundboard_clip.assert_called_once_with('clip', None)
+        schedule.assert_called_once_with('pending', window.loop)
 
     def test_real_tabs_and_reordered_control_positions(self):
         import tkinter as tk
