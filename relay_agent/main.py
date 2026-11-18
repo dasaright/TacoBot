@@ -14,6 +14,8 @@ import threading
 import time
 import queue
 import hashlib
+import urllib.request
+import zipfile
 import tkinter as tk
 from tkinter import filedialog, ttk, simpledialog, messagebox
 from pathlib import Path
@@ -497,6 +499,13 @@ CONFIG_PATH = APP_DIR / "relay-config.json"
 FILES_DIR = APP_DIR / "Files"
 YTDLP_PATH = FILES_DIR / "yt-dlp.exe"
 FFMPEG_PATH = FILES_DIR / "ffmpeg.exe"
+# yt-dlp needs a JavaScript runtime to solve YouTube's challenges. Deno is too
+# large to bundle under the updater's download limit, so it is fetched once.
+DENO_PATH = FILES_DIR / "deno.exe"
+DENO_VERSION = "2.9.8"
+DENO_URL = f"https://github.com/denoland/deno/releases/download/v{DENO_VERSION}/deno-x86_64-pc-windows-msvc.zip"
+DENO_SHA256 = "cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf"
+DENO_MAX_BYTES = 150 * 1024 * 1024
 
 
 CONFIG_LOCK = threading.RLock()
@@ -592,6 +601,8 @@ def youtube_common_args(config):
         if not cookie_path.is_absolute():
             cookie_path = APP_DIR / cookie_path
         args.extend(("--cookies", str(cookie_path)))
+    if DENO_PATH.is_file():
+        args.extend(("--js-runtimes", f"deno:{DENO_PATH}"))
     return args
 
 
@@ -1122,7 +1133,43 @@ class RelayAgent:
                 delay = min(delay * 2, 60)
 
 
+def ensure_deno(url=DENO_URL, sha256=DENO_SHA256, target=None):
+    """Download the pinned Deno runtime into Files once, verifying its checksum."""
+    target = Path(target or DENO_PATH)
+    if target.is_file():
+        return True
+    archive = extracted = None
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest = hashlib.sha256(); size = 0
+        with tempfile.NamedTemporaryFile(dir=target.parent, prefix="deno-", suffix=".zip", delete=False) as handle:
+            archive = Path(handle.name)
+            request = urllib.request.Request(url, headers={"User-Agent": "TacoBot-Relay"})
+            with urllib.request.urlopen(request, context=relay_ssl_context(), timeout=60) as response:
+                while chunk := response.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > DENO_MAX_BYTES:
+                        raise ValueError("Deno download is larger than expected.")
+                    digest.update(chunk); handle.write(chunk)
+        if digest.hexdigest() != sha256.lower():
+            raise ValueError("Deno download failed its checksum.")
+        extracted = target.with_name(target.name + ".part")
+        with zipfile.ZipFile(archive) as bundle, bundle.open("deno.exe") as source, extracted.open("wb") as output:
+            shutil.copyfileobj(source, output)
+        os.replace(extracted, target)
+        return True
+    except Exception as exc:
+        print(f"Deno download failed ({exc}); YouTube may need a JavaScript runtime.")
+        return False
+    finally:
+        for leftover in (archive, extracted):
+            if leftover is not None:
+                try: leftover.unlink(missing_ok=True)
+                except OSError: pass
+
+
 def update_ytdlp():
+    ensure_deno()
     try:
         subprocess.run(
             [str(YTDLP_PATH), "--update"],
