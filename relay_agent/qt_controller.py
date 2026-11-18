@@ -164,6 +164,37 @@ class Controller(engine.RelayWindow):
     def paste_changed(self,value):
         self.config['paste_playlist']=value; self.save()
 
+    def add_music_link(self):
+        """Queue the YouTube link typed or pasted into the music link box."""
+        url=engine.clipboard_youtube_link(self.view.music_link.text())
+        if not url:
+            self.status.set('Paste a YouTube video or playlist link first.'); self.view.music_link.setFocus(); return
+        self.send({'type':'music_enqueue','guild_id':None,'url':url,'playlist':self.view.playlist_toggle.isChecked()})
+        self.status.set('Adding to the queue…'); self.view.music_link.clear()
+
+    def save_music_link(self):
+        """Save the link in the box (or ask for one) to saved songs & playlists."""
+        url=engine.clipboard_youtube_link(self.view.music_link.text().strip())
+        if not url:
+            text,ok=QInputDialog.getText(self.view,'Save link','YouTube video or playlist link:')
+            if not ok: return
+            url=engine.clipboard_youtube_link(text)
+            if not url: QMessageBox.warning(self.view,'Save link','Enter a YouTube video or playlist link.'); return
+        in_playlist=bool(engine.re.search(r'[?&]list=[^&]+',url))
+        playlist=in_playlist and (self.view.playlist_toggle.isChecked() or 'watch' not in url)
+        title,ok=QInputDialog.getText(self.view,'Save link','Name:',text='YouTube playlist' if playlist else 'YouTube video')
+        if ok and title.strip():
+            self.save_music_favorite({'url':url,'title':title.strip(),'playlist':playlist}); self.view.music_link.clear()
+
+    def clear_music_queue(self):
+        """Remove every queued song except the one playing now."""
+        music=self.last_music or {}
+        ids=[song['id'] for song in music.get('playlist',[]) if not song.get('current')]
+        if not ids: self.status.set('The queue is already empty.'); return
+        answer=QMessageBox.question(self.view,'Clear queue',f'Remove {len(ids)} queued song(s)? The current song keeps playing.')
+        if answer!=QMessageBox.StandardButton.Yes: return
+        self.send({'type':'music_control','guild_id':None,'action':'remove','track_ids':ids}); self.refresh_music()
+
     def direct_changed(self,value):
         self.set_direct_check(value); self.toggle_direct_mode()
 
@@ -568,7 +599,9 @@ class Controller(engine.RelayWindow):
         if 'normalization_cache' in event: self.config['clip_normalization']=event['normalization_cache']; self.save_later()
         if event.get('update_checked'):
             self.update_check_running=False; self.view.check.setEnabled(True)
-            if event.get('update_stage') is not None: self.pending_update=(event['update_stage'],event.get('update_manual',False)); self.update_idle_since=None; self.view.install.setEnabled(True)
+            if event.get('update_stage') is not None:
+                self.pending_update=(event['update_stage'],event.get('update_mode','auto')); self.update_idle_since=None; self.view.install.setEnabled(True)
+                if event.get('update_build') is not None: self.view.install.setText(f"Install v1.{event['update_build']}"); self.view.install.setToolTip('Install the update and restart TacoBot')
         if 'library' in event and event['generation']==self.scan_generation:
             self.config.setdefault('clip_settings', {}).update(event.get('clip_metadata', {}))
             self.config.setdefault('clip_labels', {}).update(event.get('clip_colors', {}))
@@ -623,7 +656,9 @@ class Controller(engine.RelayWindow):
 
     def render_music(self,music):
         if music==self.last_music: return
-        self.last_music=music; self.view.now_playing.setText(music.get('current') or 'Your next song starts here')
+        self.last_music=music
+        from .qt_desktop import NOTHING_PLAYING
+        self.view.now_playing.setText(music.get('current') or NOTHING_PLAYING)
         current=next((song for song in music.get('playlist',[]) if song.get('current')),None)
         self.update_thumbnail(youtube_thumbnail(current.get('url')) if current and music.get('current') else None)
         ids=self.queue_view.selection(); scroll=self.view.queue.verticalScrollBar().value()

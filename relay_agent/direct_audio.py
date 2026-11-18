@@ -1,4 +1,5 @@
 from .clip_speed import tempo_filter
+from .loudness import normalization_filter
 """Local soundboard playback to a virtual cable and speakers, without Discord APIs."""
 import subprocess
 import threading
@@ -102,7 +103,7 @@ class DirectAudio:
                     streams.append(stream); stream.start()
                 gain = max(0, min(2, 1 + adjustment / 100))
                 process = subprocess.Popen([str(self.ffmpeg), '-hide_banner', '-loglevel', 'error',
-                    '-i', str(path), '-vn', '-af', f'volume={gain_db}dB,volume={gain},' + tempo_filter(speed),
+                    '-i', str(path), '-vn', '-af', normalization_filter(gain_db) + f',volume={gain},' + tempo_filter(speed),
                     '-ar', '48000', '-ac', '2', '-f', 's16le', 'pipe:1'],
                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW if __import__('os').name == 'nt' else 0)

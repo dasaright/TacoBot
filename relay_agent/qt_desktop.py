@@ -77,6 +77,14 @@ def row(parent):
     return layout
 
 
+NOTHING_PLAYING = 'Nothing playing · paste a YouTube link above to start'
+
+
+def hint(text):
+    label = QLabel(text); label.setStyleSheet('color:#a5b3c1; font-size:12px;'); label.setWordWrap(True)
+    return label
+
+
 class MusicTree(QTreeWidget):
     MIME = 'application/x-tacobot-selection'
     def __init__(self, view, kind):
@@ -301,22 +309,39 @@ class Desktop(QMainWindow):
         slider.valueChanged.connect(changed); layout.addWidget(slider); layout.addWidget(text); return slider
 
     def build_music(self):
-        area = QVBoxLayout(self.page_widgets[0]); area.setContentsMargins(0,0,0,0); area.setSpacing(14)
-        tools = QWidget(); bar = row(tools)
-        self.previous=button('Previous', lambda:self.controller.music_control('previous'), 'previous'); self.previous.setEnabled(False); bar.addWidget(self.previous)
-        self.play = button('Play', lambda:self.controller.music_control('toggle'), 'play', True); bar.addWidget(self.play)
-        bar.addWidget(button('Next', lambda:self.controller.music_control('next'), 'next'))
-        self.playlist_toggle = QCheckBox('Paste full playlist'); self.playlist_toggle.setChecked(self.config.get('paste_playlist',False)); self.playlist_toggle.toggled.connect(lambda value:self.controller.paste_changed(value)); bar.addWidget(self.playlist_toggle)
-        self.music_volume = self.volume(bar,'music_volume'); bar.addStretch(); area.addWidget(tools)
+        area = QVBoxLayout(self.page_widgets[0]); area.setContentsMargins(0,0,0,0); area.setSpacing(12)
+        # 1. Add music: a visible link box (Ctrl+V anywhere still works).
+        add = QWidget(); add_row = row(add)
+        self.music_link = QLineEdit(); self.music_link.setClearButtonEnabled(True)
+        self.music_link.setPlaceholderText('Paste a YouTube video or playlist link, then press Enter')
+        self.music_link.returnPressed.connect(lambda:self.controller.add_music_link()); add_row.addWidget(self.music_link,1)
+        self.playlist_toggle = QCheckBox('Whole playlist'); self.playlist_toggle.setToolTip('For links that are part of a playlist: queue every song instead of just this one')
+        self.playlist_toggle.setChecked(self.config.get('paste_playlist',False)); self.playlist_toggle.toggled.connect(lambda value:self.controller.paste_changed(value)); add_row.addWidget(self.playlist_toggle)
+        add_row.addWidget(button('Add to queue', lambda:self.controller.add_music_link(), 'arrow', True))
+        save = button('Save', lambda:self.controller.save_music_link(), 'save'); save.setToolTip('Save this link to your saved songs & playlists'); add_row.addWidget(save)
+        area.addWidget(add)
+        # 2. Now playing with the transport controls beside it.
         now = QWidget(); now_row = row(now)
         self.thumbnail = QLabel(); self.thumbnail.setFixedSize(144,81); self.thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter); self.thumbnail.hide(); now_row.addWidget(self.thumbnail)
-        self.now_playing = QLabel('Your next song starts here'); self.now_playing.setWordWrap(True); self.now_playing.setStyleSheet('font-size:20px; font-weight:600; padding:12px 0;'); now_row.addWidget(self.now_playing,1); area.addWidget(now)
+        self.now_playing = QLabel(NOTHING_PLAYING); self.now_playing.setWordWrap(True); self.now_playing.setStyleSheet('font-size:20px; font-weight:600; padding:8px 0;'); now_row.addWidget(self.now_playing,1)
+        self.previous=button('Previous', lambda:self.controller.music_control('previous'), 'previous'); self.previous.setEnabled(False); now_row.addWidget(self.previous)
+        self.play = button('Play', lambda:self.controller.music_control('toggle'), 'play', True); now_row.addWidget(self.play)
+        now_row.addWidget(button('Next', lambda:self.controller.music_control('next'), 'next'))
+        self.music_volume = self.volume(now_row,'music_volume'); area.addWidget(now)
+        # 3. Saved items (left) and the queue (right), each with its own actions and hint.
         split = QSplitter(); saved = QWidget(); left = QVBoxLayout(saved); left.setContentsMargins(0,0,0,0)
         self.favorites = MusicTree(self,'favorites'); left.addWidget(self.favorites,1)
-        buttons = QWidget(); controls = row(buttons); controls.addWidget(button('Save Playlist Link', lambda:self.controller.save_playlist_link(),'save')); controls.addWidget(button('Add selection to queue',lambda:self.controller.add_favorite_selection(),'arrow')); controls.addStretch(); left.addWidget(buttons)
-        self.queue = MusicTree(self,'queue'); self.queue.setRootIsDecorated(False)
+        buttons = QWidget(); controls = row(buttons); controls.addWidget(button('Add selection to queue',lambda:self.controller.add_favorite_selection(),'arrow')); controls.addStretch(); left.addWidget(buttons)
+        left.addWidget(hint('Double-click to queue · drag into the queue · right-click to remove'))
+        queued = QWidget(); right = QVBoxLayout(queued); right.setContentsMargins(0,0,0,0)
+        self.queue = MusicTree(self,'queue'); self.queue.setRootIsDecorated(False); right.addWidget(self.queue,1)
+        queue_buttons = QWidget(); queue_controls = row(queue_buttons)
+        queue_controls.addWidget(button('Remove selected', lambda:self.controller.remove_queue_song(), 'stop'))
+        queue_controls.addWidget(button('Clear queue', lambda:self.controller.clear_music_queue()))
+        queue_controls.addStretch(); right.addWidget(queue_buttons)
+        right.addWidget(hint('Double-click a song to play it · drag to reorder · Delete removes'))
         self.favorites.itemDoubleClicked.connect(lambda item,column:self.controller.enqueue_item(item)); self.favorites.itemExpanded.connect(lambda item:self.controller.expand_playlist(item))
-        self.queue.itemDoubleClicked.connect(lambda item,column:self.controller.select_song(item)); split.addWidget(saved); split.addWidget(self.queue); split.setSizes([440,700]); area.addWidget(split,1)
+        self.queue.itemDoubleClicked.connect(lambda item,column:self.controller.select_song(item)); split.addWidget(saved); split.addWidget(queued); split.setSizes([440,700]); area.addWidget(split,1)
         QShortcut(QKeySequence(Qt.Key.Key_Delete),self.queue,activated=lambda:self.controller.remove_queue_song())
 
     def build_clips(self):
@@ -375,11 +400,12 @@ class Desktop(QMainWindow):
         self.voice.currentTextChanged.connect(lambda:self.controller.save_tts_voice() if hasattr(self,'controller') else None); self.speaker.currentTextChanged.connect(lambda:self.controller.save_tts_voice() if hasattr(self,'controller') else None)
 
     def clipboard_play(self):
+        # Typing in a text box (e.g. the music link box): paste normally.
+        focus = QApplication.focusWidget()
+        if isinstance(focus,(QLineEdit,QTextEdit)):
+            focus.paste(); return
         url = engine.clipboard_youtube_link(QApplication.clipboard().text())
         if url: self.controller.send({'type':'music_enqueue','guild_id':None,'url':url,'playlist':self.playlist_toggle.isChecked()})
-        else:
-            focus = QApplication.focusWidget()
-            if isinstance(focus,(QLineEdit,QTextEdit)): focus.paste()
 
     def dragEnterEvent(self,event):
         if event.mimeData().hasUrls(): event.acceptProposedAction()
