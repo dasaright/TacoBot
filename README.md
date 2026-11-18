@@ -211,6 +211,14 @@ Select **Translate from** and a target language, then press **Translate**. The r
 
 Argos models/source: https://github.com/argosopentech/argos-translate and https://github.com/argosopentech/argospm-index . CTranslate2: https://github.com/OpenNMT/CTranslate2 .
 
+## Kokoro voices and voice cloning
+
+**Kokoro** adds 41 more natural-sounding voices (US and British English, Spanish, French, Italian, Portuguese, and Hindi), listed as `(…, Kokoro)` in Manage voices. All Kokoro voices share one model (about 350 MB, Apache-2.0) downloaded once into `Files/TTS/kokoro`; removing the download from any Kokoro voice removes it for all of them.
+
+**Cloned voices** use Resemble AI's Chatterbox Turbo (MIT). In Manage voices choose **Add cloned voice…**, name it, pick a recording of 5–15 seconds of clear speech from one person with no music or background noise, and confirm you have that person's permission. The first cloned voice downloads the cloning model (about 1.3 GB) into `Files/TTS/chatterbox-turbo`. Cloned voices speak English and understand tags such as `[laugh]`, `[chuckle]`, `[sigh]`, or `[cough]` in the text. Generation runs on the CPU at roughly real time, so longer messages take a few seconds. **Remove download** on a cloned voice deletes that voice; removing the last one also deletes the cloning model. Only clone voices you have permission to use.
+
+All model files are pinned to exact releases and checked against SHA-256 checksums before use.
+
 ## Managing TTS voices
 
 **Manage voices** lists every available model, whether it is downloaded, whether it is enabled in your TTS selector, and its speaker count. Search/filter the list, select one or more models, and choose **Download & enable**, **Enable**, **Disable**, or **Remove download**. **Use selected** chooses the selected model. Disabling keeps its download on disk; removing a download also disables it. Enabling a model without downloading lets it download on first playback. Your enabled list is saved across restarts.

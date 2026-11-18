@@ -305,6 +305,27 @@ class QtDesktopTests(unittest.TestCase):
     def test_voice_manager_still_lists_download_enable_and_speaker_options(self):
         c=self.controller; c.manage_voices(); self.app.processEvents()
         self.assertGreater(len(c.voice_models.get_children()),60)
-        self.assertEqual(len(c.voice_manager_buttons),5)
+        self.assertEqual(len(c.voice_manager_buttons),6)
         self.assertGreater(self.window.voice.count(),0); self.assertGreater(self.window.speaker.count(),0)
+        c.voice_manager.close(); self.app.processEvents()
+
+    def test_add_cloned_voice_requires_name_recording_and_consent(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QLineEdit, QPushButton
+        c=self.controller; c.manage_voices(); self.app.processEvents(); seen={}
+        def fill():
+            dialog=next(w for w in QApplication.topLevelWidgets() if isinstance(w,QDialog) and w.windowTitle()=='TacoBot · Add cloned voice' and w.isVisible())
+            add=next(b for b in dialog.findChildren(QPushButton) if b.text()=='Add voice')
+            dialog.findChild(QLineEdit).setText('Taco Host')
+            next(b for b in dialog.findChildren(QPushButton) if b.text()=='Choose recording…').click()
+            seen['before_consent']=add.isEnabled()
+            dialog.findChild(QCheckBox).setChecked(True); seen['after_consent']=add.isEnabled(); add.click()
+        QTimer.singleShot(0,fill)
+        with patch('relay_agent.qt_controller.QFileDialog.getOpenFileName',return_value=('C:/voice.wav','')),              patch.object(c.agent.speech,'add_clone',return_value='clone-taco-host') as add_clone,              patch('relay_agent.qt_controller.threading.Thread') as thread:
+            c.add_cloned_voice()
+            thread.call_args.kwargs['target']()
+        self.assertEqual(seen,{'before_consent':False,'after_consent':True})
+        add_clone.assert_called_once_with('Taco Host','C:/voice.wav')
+        event=c.agent.events.get_nowait()
+        self.assertEqual(event['voice_models_finished'],['clone-taco-host']); self.assertEqual(event['voice_models_action'],'download')
         c.voice_manager.close(); self.app.processEvents()

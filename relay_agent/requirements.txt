@@ -5,6 +5,8 @@ tkinterdnd2==0.6.3
 sounddevice==0.5.3
 Pillow==12.3.0
 piper-tts==1.8.0
+kokoro-onnx==0.6.1
+tokenizers==0.23.3
 ctranslate2==4.6.0
 sentencepiece==0.2.1
 

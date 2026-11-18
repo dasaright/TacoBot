@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher
 from PySide6.QtGui import QAction, QColor, QBrush, QPixmap
 from PySide6.QtWidgets import (QApplication, QMenu, QFileDialog, QInputDialog, QMessageBox,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QLineEdit,
-    QTreeWidget, QAbstractItemView)
+    QTreeWidget, QAbstractItemView, QCheckBox)
 
 from . import main as engine
 from . import clip_catalog
@@ -505,18 +505,50 @@ class Controller(engine.RelayWindow):
 
     def manage_voices(self):
         dialog=QDialog(self.view); dialog.setWindowTitle('TacoBot · Voice models'); dialog.resize(900,560); layout=QVBoxLayout(dialog)
-        layout.addWidget(QLabel('Download and enable the voice models you want to keep locally.'))
+        layout.addWidget(QLabel('Download and enable the voice models you want to keep locally. Kokoro voices share one 350 MB model.\n'
+                                'Cloned voices use a 1.3 GB model; “Remove download” on a cloned voice deletes that voice.'))
         search=QLineEdit(); search.setPlaceholderText('Filter voice models'); layout.addWidget(search)
         tree=QTreeWidget(); tree.setColumnCount(4); tree.setHeaderLabels(['Voice model','Downloaded','Enabled','Speakers']); tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection); tree.setRootIsDecorated(False); tree.header().resizeSection(0,490); layout.addWidget(tree,1)
         self.voice_models=Tree(tree); self.voice_filter=Value(getter=search.text); self.voice_model_status=Value(setter=lambda text:status.setText(text)); self.voice_manager_buttons=[]
         buttons=QHBoxLayout(); layout.addLayout(buttons)
         for text,action in [('Download & enable','download'),('Enable','enable'),('Disable','disable'),('Remove download','remove'),('Use selected','use')]:
             widget=QPushButton(text); widget.clicked.connect(lambda checked=False,action=action:self.change_voice_models(action)); buttons.addWidget(widget); self.voice_manager_buttons.append(Control(widget))
+        clone=QPushButton('Add cloned voice…'); clone.clicked.connect(self.add_cloned_voice); buttons.addWidget(clone); self.voice_manager_buttons.append(Control(clone))
         status=QLabel('Select one or more models.'); layout.addWidget(status); self.voice_manager=dialog
         search.textChanged.connect(self.refresh_voice_models); self.refresh_voice_models(); dialog.finished.connect(lambda:self.clear_voice_manager()); dialog.show()
 
     def clear_voice_manager(self):
         self.voice_manager=None
+
+    def add_cloned_voice(self):
+        dialog=QDialog(self.voice_manager or self.view); dialog.setWindowTitle('TacoBot · Add cloned voice'); layout=QVBoxLayout(dialog)
+        info=QLabel('Clone a voice from 5–15 seconds of clear speech by one person, with no music or background noise.\n'
+                    'Cloned voices speak English and support tags like [laugh] or [sigh]. The first one downloads a 1.3 GB model.')
+        info.setWordWrap(True); layout.addWidget(info)
+        name=QLineEdit(); name.setPlaceholderText('Voice name'); name.setMaxLength(40); layout.addWidget(name)
+        pick=QHBoxLayout(); layout.addLayout(pick); source=QLabel('No recording selected'); pick.addWidget(source,1)
+        browse=QPushButton('Choose recording…'); pick.addWidget(browse)
+        consent=QCheckBox('I have permission from the person whose voice this is to clone it.'); layout.addWidget(consent)
+        actions=QHBoxLayout(); layout.addLayout(actions); actions.addStretch()
+        add=QPushButton('Add voice'); cancel=QPushButton('Cancel'); actions.addWidget(add); actions.addWidget(cancel)
+        chosen={'path':''}
+        def update(): add.setEnabled(bool(name.text().strip()) and bool(chosen['path']) and consent.isChecked())
+        def choose():
+            path,_=QFileDialog.getOpenFileName(dialog,'Voice recording',str(Path.home()),'Audio (*.wav *.mp3 *.m4a *.ogg *.opus *.flac *.aac *.webm)')
+            if path: chosen['path']=path; source.setText(Path(path).name); update()
+        browse.clicked.connect(choose); name.textChanged.connect(update); consent.toggled.connect(update)
+        cancel.clicked.connect(dialog.reject); add.clicked.connect(dialog.accept); update()
+        if dialog.exec()!=QDialog.DialogCode.Accepted: return
+        voice_name,path=name.text().strip(),chosen['path']
+        for control in self.voice_manager_buttons: control.configure(state='disabled')
+        self.voice_model_status.set('Adding cloned voice… The first one downloads the 1.3 GB cloning model.')
+        def worker():
+            try:
+                voice=self.agent.speech.add_clone(voice_name,path)
+                self.agent.events.put({'voice_models_done':True,'voice_models_action':'download','voice_models_finished':[voice]})
+            except Exception as exc:
+                self.agent.events.put({'voice_models_done':True,'voice_models_action':'download','voice_models_finished':[],'error':'Could not add cloned voice: '+engine.clean_error(exc)})
+        threading.Thread(target=worker,daemon=True).start()
 
     def refresh_voice_models(self):
         if self.voice_manager is None: return

@@ -23,7 +23,9 @@ class TranslationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):translator.translate(text,'en','fr')
 
     def test_voice_catalog_covers_all_languages_and_speakers(self):
-        self.assertEqual(set(v['language'] for v in VOICE_CATALOG.values()),{'en','nl','de','fr','bg'})
+        from relay_agent.tts import LANGUAGES as VOICE_LANGUAGES
+        self.assertEqual(set(v['language'] for v in VOICE_CATALOG.values() if v.get('engine','piper')=='piper'),{'en','nl','de','fr','bg'})
+        self.assertEqual(set(v['language'] for v in VOICE_CATALOG.values()),set(VOICE_LANGUAGES.values()))
         self.assertEqual(len(VOICE_OPTIONS),len(VOICE_CATALOG))
         self.assertEqual(VOICE_CATALOG['bg_BG-dimitar-medium']['speakers'],1)
         self.assertEqual(VOICE_CATALOG['de_DE-thorsten_emotional-medium']['speakers'],8)
