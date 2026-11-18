@@ -648,7 +648,7 @@ class RelayAgent:
         self.local_files = {}
         self.tts_files = {}
         self.tts_lock = asyncio.Lock()
-        self.speech = PiperSpeech(FILES_DIR / "TTS")
+        self.speech = PiperSpeech(FILES_DIR / "TTS", FFMPEG_PATH)
         self.translator = LocalTranslator(FILES_DIR / "Translation")
         self.normalization_cache = dict(config.get("clip_normalization", {}))
         self.normalization_locks = {}
@@ -1011,7 +1011,7 @@ class RelayAgent:
             async with self.tts_lock:
                 if self.websocket is None:
                     raise ValueError("Connect your relay token before playing text.")
-                self.events.put({"status": "Generating speech… First use downloads the Piper voice."})
+                self.events.put({"status": "Generating speech… First use downloads the voice model."})
                 path = await asyncio.to_thread(self.speech.synthesize, text, voice_id, speaker_id)
                 file_id = "tts:" + path.stem
                 self.tts_files[file_id] = path
@@ -3060,6 +3060,11 @@ if __name__ == "__main__":
             verify_tools()
             from piper import PiperVoice
             assert PiperVoice
+            # Kokoro needs the bundled espeak-ng; voice cloning needs tokenizers.
+            from kokoro_onnx.tokenizer import Tokenizer as KokoroTokenizer
+            assert KokoroTokenizer().phonemize("Packaged TacoBot speech test.", "en-us").strip()
+            from tokenizers import Tokenizer as CloneTokenizer
+            assert CloneTokenizer
             if os.getenv("TACOBOT_TTS_TEST_DIR"):
                 import wave
                 speech_test = PiperSpeech(os.environ["TACOBOT_TTS_TEST_DIR"])
