@@ -28,7 +28,8 @@ if __package__:
     from .updater import find_update, prepare_update, launch_installer
     from .direct_audio import DirectAudio, audio_devices
     from .loudness import (NORMALIZATION_MAX_GAIN_DB, NORMALIZATION_MAX_LIMITING_DB,
-                           NORMALIZATION_TARGET_DB, PEAK_CEILING_DB, normalization_filter)
+                           NORMALIZATION_TARGET_DB, PEAK_CEILING_DB, normalization_filter,
+                           stream_normalization_filter)
     from .translation import LocalTranslator, LANGUAGES
     from .tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 else:
@@ -36,7 +37,8 @@ else:
     from updater import find_update, prepare_update, launch_installer
     from direct_audio import DirectAudio, audio_devices
     from loudness import (NORMALIZATION_MAX_GAIN_DB, NORMALIZATION_MAX_LIMITING_DB,
-                          NORMALIZATION_TARGET_DB, PEAK_CEILING_DB, normalization_filter)
+                          NORMALIZATION_TARGET_DB, PEAK_CEILING_DB, normalization_filter,
+                          stream_normalization_filter)
     from translation import LocalTranslator, LANGUAGES
     from tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 
@@ -856,7 +858,7 @@ class RelayAgent:
                     stderr=asyncio.subprocess.PIPE,
                     creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0),
                 )
-            normalization_args = []
+            normalization_args = ["-af", stream_normalization_filter()]
             if local_path is not None:
                 gain_db = await self.normalize_clip(local_path)
                 filters = normalization_filter(gain_db)
