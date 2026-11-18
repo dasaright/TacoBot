@@ -63,6 +63,18 @@ class QtDesktopTests(unittest.TestCase):
         self.assertGreater(self.saved['clip_settings'][key]['volume'],80)
         self.controller.send.assert_not_called()
 
+    def test_clip_volume_slider_snaps_to_zero_near_centre(self):
+        w=self.window; w.select_tab(1); self.app.processEvents()
+        index=w.clip_model.index(0,1); rect=w.clips.visualRect(index); key=index.data(Qt.ItemDataRole.UserRole)
+        left,right=rect.left()+12,max(rect.left()+13,rect.right()-58); centre=round((left+right)/2)
+        for offset in (-5,-2,0,3,5):
+            QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=QPoint(centre+offset,rect.center().y()))
+            self.assertEqual(self.saved['clip_settings'][key]['volume'],0)
+        QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=QPoint(centre+15,rect.center().y()))
+        self.assertGreater(self.saved['clip_settings'][key]['volume'],0)
+        QTest.mouseClick(w.clips.viewport(),Qt.MouseButton.LeftButton,pos=QPoint(centre-15,rect.center().y()))
+        self.assertLess(self.saved['clip_settings'][key]['volume'],0)
+
     def test_native_favorite_drag_payload_preserves_playlist_children(self):
         c=self.controller; tree=c.favorites_view
         playlist=tree.get_children()[0]; children=tree.get_children(playlist)
@@ -183,6 +195,10 @@ class QtDesktopTests(unittest.TestCase):
         editor.selection(1,2.5)
         with patch.object(editor.preview,'start') as play:
             editor.play_selection(); play.assert_called_once_with(Path('clip.wav'),1,2.5)
+        with patch.object(type(editor.preview),'playing',new=True),patch.object(editor.preview,'start') as play,patch.object(editor.preview,'pause') as pause:
+            editor.selection(1.75,2.5); editor.play_here.click()
+            play.assert_called_once_with(Path('clip.wav'),1.75,2.5); pause.assert_not_called()
+            self.assertEqual(editor.wave.position,1.75); self.assertEqual(editor.play_here.text(),'Play from here')
         with tempfile.TemporaryDirectory() as directory,patch.object(c,'refresh_files'):
             target=Path(directory)/'edited.wav'; target.write_bytes(b'audio')
             c.editor_saved({'source_key':'a','source':'original.wav','saved':str(target)})

@@ -216,7 +216,9 @@ class ClipDelegate(QStyledItemDelegate):
         if event.type() not in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease): return False
         if event.type() == QEvent.Type.MouseMove and not event.buttons() & Qt.MouseButton.LeftButton: return False
         left, right = option.rect.left()+12, max(option.rect.left()+13, option.rect.right()-58)
-        value = round(max(0, min(1, (event.position().x()-left)/(right-left))) * 200 - 100)
+        x = event.position().x()
+        # Each pixel is ~2%, so snap to 0% near the centre instead of landing on -1%/+1%.
+        value = 0 if abs(x-(left+right)/2) <= 6 else round(max(0, min(1, (x-left)/(right-left))) * 200 - 100)
         self.view.controller.set_volume(index.data(Qt.ItemDataRole.UserRole), value)
         self.view.clips.viewport().update(option.rect)
         return True
