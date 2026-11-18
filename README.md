@@ -51,6 +51,10 @@ stream fixed-format PCM audio, and cancel a stream. Changes to Discord
 commands, permissions, queues, forms, personas, or server configuration do not
 require a relay update.
 
+On first start the relay also downloads a pinned, checksum-verified Deno
+runtime to `Files/deno.exe`; yt-dlp needs it to solve YouTube's JavaScript
+challenges. Without it YouTube reports "No video formats found".
+
 `yt-dlp.exe` checks for its own updates whenever the relay starts. FFmpeg and
 the relay executable only need replacement when the protocol or their own
 runtime requirements change.
