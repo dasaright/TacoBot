@@ -91,7 +91,7 @@ class ClipEditor(QWidget):
         self.wave=Waveform(); self.wave.selectionChanged.connect(self.selection); layout.addWidget(self.wave,1)
         controls=QWidget(); buttons=QHBoxLayout(controls); buttons.setContentsMargins(0,0,0,0)
         self.play=button('Play selection',self.play_selection,'play'); buttons.addWidget(self.play)
-        end=button('Play end',lambda:self.play_selection(tail=True),'play'); buttons.addWidget(end)
+        self.play_here=button('Play from here',lambda:self.play_selection(restart=True),'play'); buttons.addWidget(self.play_here)
         stop=button('Stop',self.stop_preview,'stop'); buttons.addWidget(stop)
         buttons.addWidget(QLabel('Start')); self.start=QDoubleSpinBox(); buttons.addWidget(self.start)
         buttons.addWidget(QLabel('End')); self.end=QDoubleSpinBox(); buttons.addWidget(self.end)
@@ -156,13 +156,13 @@ class ClipEditor(QWidget):
         from .qt_desktop import icon
         self.preview.stop(); self.play.setText('Play selection'); self.play.setIcon(icon('play'))
 
-    def play_selection(self,tail=False):
+    def play_selection(self,restart=False):
         if self.path is None or self.loaded_fingerprint is None: return
         if self.end.value()<=self.start.value(): self.message.setText('End must be after start.'); return
-        if self.preview.playing and not tail:
+        if self.preview.playing and not restart:
             from .qt_desktop import icon
             paused=self.preview.pause(); self.play.setText('Resume' if paused else 'Pause'); self.play.setIcon(icon('play' if paused else 'pause')); return
-        start=max(self.start.value(),self.end.value()-2) if tail else self.start.value()
+        start=self.start.value(); self.wave.position=start; self.wave.update()
         from .qt_desktop import icon
         self.preview.start(self.path,start,self.end.value()); self.play.setText('Pause'); self.play.setIcon(icon('pause'))
 
