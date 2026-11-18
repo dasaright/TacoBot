@@ -94,8 +94,10 @@ class ShareClipTests(unittest.IsolatedAsyncioTestCase):
 class NormalizationTests(unittest.IsolatedAsyncioTestCase):
     def test_gain_lowers_loud_clips_boosts_quiet_and_reserves_slider_headroom(self):
         from relay_agent.main import clip_normalization_gain
-        self.assertEqual(clip_normalization_gain('mean_volume: -10.0 dB max_volume: -4.0 dB'), -10)
-        self.assertEqual(clip_normalization_gain('mean_volume: -30.0 dB max_volume: -15.0 dB'), 8)
+        self.assertEqual(clip_normalization_gain('mean_volume: -10.0 dB max_volume: -4.0 dB'), -6)
+        self.assertEqual(clip_normalization_gain('mean_volume: -30.0 dB max_volume: -15.0 dB'), 14)
+        # Peaky clip: limited to 6 dB over the -1 dB ceiling instead of staying quiet.
+        self.assertEqual(clip_normalization_gain('mean_volume: -25.0 dB max_volume: -2.0 dB'), 7)
         self.assertEqual(clip_normalization_gain('mean_volume: -91.0 dB max_volume: -91.0 dB'), 0)
         self.assertEqual(clip_normalization_gain('mean_volume: -80.0 dB max_volume: -60.0 dB'), 24)
 

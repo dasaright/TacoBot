@@ -25,12 +25,16 @@ if __package__:
     from .shared_clips import sync_clips, edit_shared_clip, check_share_target
     from .updater import find_update, prepare_update, launch_installer
     from .direct_audio import DirectAudio, audio_devices
+    from .loudness import (NORMALIZATION_MAX_GAIN_DB, NORMALIZATION_MAX_LIMITING_DB,
+                           NORMALIZATION_TARGET_DB, PEAK_CEILING_DB, normalization_filter)
     from .translation import LocalTranslator, LANGUAGES
     from .tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 else:
     from shared_clips import sync_clips, edit_shared_clip, check_share_target
     from updater import find_update, prepare_update, launch_installer
     from direct_audio import DirectAudio, audio_devices
+    from loudness import (NORMALIZATION_MAX_GAIN_DB, NORMALIZATION_MAX_LIMITING_DB,
+                          NORMALIZATION_TARGET_DB, PEAK_CEILING_DB, normalization_filter)
     from translation import LocalTranslator, LANGUAGES
     from tts import PiperSpeech, MAX_TEXT, VOICE, VOICE_OPTIONS, VOICE_CATALOG
 
@@ -424,7 +428,7 @@ def copy_clip_to_shared(source, folder):
     return target
 
 
-NORMALIZATION_VERSION = 1
+NORMALIZATION_VERSION = 2
 
 
 def clip_normalization_gain(report):
@@ -435,8 +439,11 @@ def clip_normalization_gain(report):
     mean, peak = float(mean[1]), float(peak[1])
     if not math.isfinite(mean) or not math.isfinite(peak) or peak <= -90:
         return 0.0
-    # Average loudness target with 7 dB of peak headroom. User gain runs later.
-    return round(min(-20.0 - mean, -7.0 - peak, 24.0), 3)
+    # Loudness target; the limiter in normalization_filter() catches the peaks.
+    # User gain runs later.
+    return round(min(NORMALIZATION_TARGET_DB - mean,
+                     PEAK_CEILING_DB + NORMALIZATION_MAX_LIMITING_DB - peak,
+                     NORMALIZATION_MAX_GAIN_DB), 3)
 
 
 def clipboard_youtube_link(text):
@@ -841,7 +848,7 @@ class RelayAgent:
             normalization_args = []
             if local_path is not None:
                 gain_db = await self.normalize_clip(local_path)
-                filters = f"volume={gain_db}dB"
+                filters = normalization_filter(gain_db)
                 if not url[6:].startswith("tts:"):
                     from .clip_speed import tempo_filter
                     filters += "," + tempo_filter(self.config.get("clip_speed", 0))
@@ -1835,8 +1842,13 @@ class RelayWindow:
                         "status": "Relay is up to date." if manual else None})
                 else:
                     stage = prepare_update(update)
+                    # A manual check only downloads and announces the update; the
+                    # Install button installs it. Auto-update installs when idle.
                     self.agent.events.put({"update_checked": True, "update_stage": stage,
-                        "update_manual": manual, "status": f"Relay build {update['build']} downloaded; waiting for audio to finish."})
+                        "update_mode": "ask" if manual else "auto", "update_build": update["build"],
+                        "status": (f"TacoBot v1.{update['build']} is ready. Click Install to update and restart."
+                                   if manual else
+                                   f"TacoBot v1.{update['build']} downloaded; installing when audio is idle.")})
             except Exception as exc:
                 self.agent.events.put({"update_checked": True,
                     "status": "Update check failed; playback remains available. " + clean_error(exc)})
@@ -1845,7 +1857,7 @@ class RelayWindow:
     def install_update_now(self):
         if self.pending_update:
             stage, _ = self.pending_update
-            self.pending_update = (stage, True)
+            self.pending_update = (stage, "now")
             self.update_idle_since = time.monotonic() - 30
         else:
             self.install_button.configure(state="disabled")
@@ -1855,7 +1867,11 @@ class RelayWindow:
         if hasattr(self, "install_button"):
             self.install_button.configure(state="normal" if self.pending_update else "disabled")
         if self.pending_update is not None:
-            stage, manual = self.pending_update
+            stage, mode = self.pending_update
+            mode = {True: "now", False: "auto"}.get(mode, mode)  # older (stage, bool) tuples
+            if mode == "ask":
+                return
+            manual = mode == "now"
             if not manual and not self.auto_update.get():
                 self.pending_update = None
                 threading.Thread(target=lambda: shutil.rmtree(stage, ignore_errors=True), daemon=True).start()
@@ -2857,7 +2873,7 @@ class RelayWindow:
                 self.update_button.configure(state="normal")
                 if event.get("update_stage") is not None:
                     self.install_button.configure(state="normal")
-                    self.pending_update = (event["update_stage"], event["update_manual"])
+                    self.pending_update = (event["update_stage"], event.get("update_mode", "auto"))
                     self.update_idle_since = None
             if event.get("import_done") and event.get("folder") == self.folder.get():
                 self.refresh_files()

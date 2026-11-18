@@ -189,3 +189,52 @@ class InstallerEnvironmentTests(unittest.TestCase):
         self.assertNotIn('_MEIPASS2',env)
         self.assertEqual(env['PYINSTALLER_RESET_ENVIRONMENT'],'1')
         self.assertEqual(env['OTHER'],'keep')
+
+
+class UpdateModeTests(UpdateWindowTests):
+    """Checking for updates only announces them; Install installs and restarts."""
+
+    def test_manual_check_result_waits_for_install_button(self):
+        window = self.window()
+        window.pending_update = (Path('test-stage'), 'ask')
+        with patch('relay_agent.main.time.monotonic', return_value=999), patch('relay_agent.main.launch_installer') as install:
+            for _ in range(3):
+                window.poll_updates()
+        install.assert_not_called()
+        window.close.assert_not_called()
+        self.assertEqual(window.pending_update, (Path('test-stage'), 'ask'))
+
+    def test_manual_check_result_kept_when_auto_update_is_off(self):
+        window = self.window()
+        window.auto_update.get.return_value = False
+        window.pending_update = (Path('test-stage'), 'ask')
+        with patch('relay_agent.main.launch_installer') as install:
+            window.poll_updates()
+        install.assert_not_called()
+        self.assertIsNotNone(window.pending_update)
+
+    def test_install_button_installs_and_closes_for_restart(self):
+        from unittest.mock import Mock
+        window = self.window()
+        window.install_button = Mock()
+        window.agent.clip_tasks = {'clip': Mock(done=lambda: False)}
+        window.pending_update = (Path('test-stage'), 'ask')
+        with patch('relay_agent.main.launch_installer') as install:
+            window.install_update_now()
+            window.poll_updates()
+        install.assert_called_once()
+        window.close.assert_called_once()
+
+    def test_auto_mode_still_installs_when_idle(self):
+        window = self.window()
+        window.pending_update = (Path('test-stage'), 'auto')
+        with patch('relay_agent.main.time.monotonic', return_value=31), patch('relay_agent.main.launch_installer') as install:
+            self.assertTrue(window.poll_updates())
+        install.assert_called_once()
+
+
+class NormalizationFilterTests(unittest.TestCase):
+    def test_filter_applies_gain_then_limits_below_minus_one_dbfs(self):
+        from relay_agent.loudness import normalization_filter
+        self.assertEqual(normalization_filter(-6.5),
+                         'volume=-6.5dB,alimiter=limit=0.8913:attack=5:release=50:level=false')
