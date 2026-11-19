@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QMimeData, QPoi
 from PySide6.QtGui import QColor, QPainter, QPen, QIcon, QImage, QPixmap, QDrag, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedLayout, QPushButton, QLabel, QCheckBox, QLineEdit, QSlider, QTableView,
-    QStyledItemDelegate, QTreeWidget, QAbstractItemView, QSplitter, QTextEdit,
+    QStyledItemDelegate, QTreeWidget, QListWidget, QListWidgetItem, QAbstractItemView, QSplitter, QTextEdit,
     QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView, QSystemTrayIcon, QSpinBox)
 
 from . import main as engine
@@ -25,9 +25,10 @@ QPushButton:checked { background:#243c37; color:#52d4ba; font-weight:600; }
 QPushButton:disabled { color:#62707c; background:#1b2027; }
 QPushButton[primary="true"] { background:#52d4ba; color:#10211e; }
 QLineEdit,QTextEdit,QComboBox { background:#1b2027; border:0; border-radius:5px; padding:6px; }
-QTreeView,QTableView { background:#1b2027; alternate-background-color:#191e25; border:0; outline:0; }
+QTreeView,QTableView,QListView { background:#1b2027; alternate-background-color:#191e25; border:0; outline:0; }
 QTreeView::item,QTableView::item { padding:2px 5px; }
-QTreeView::item:selected,QTableView::item:selected { background:#294943; color:#f3faf8; }
+QListView::item { padding:7px 8px; }
+QTreeView::item:selected,QTableView::item:selected,QListView::item:selected { background:#294943; color:#f3faf8; }
 QHeaderView::section { background:#162337; color:#c8d5e4; border:0; padding:7px 8px; font-weight:600; }
 QScrollBar:vertical { background:#14171c; width:8px; margin:0; border:0; }
 QScrollBar::handle:vertical { background:#526170; border-radius:4px; min-height:36px; }
@@ -248,6 +249,25 @@ class SpeechInput(QTextEdit):
         super().keyPressEvent(event)
 
 
+class PhraseList(QListWidget):
+    """Saved TTS phrases. Each is generated ahead of time, so a click plays it at once."""
+    def __init__(self, view):
+        super().__init__(); self.view = view
+        self.setAlternatingRowColors(True); self.setWordWrap(True); self.setUniformItemSizes(False)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove); self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda point:self.view.controller.phrase_menu(point))
+        self.itemClicked.connect(lambda item:self.view.controller.play_phrase(item.data(Qt.ItemDataRole.UserRole)))
+        QShortcut(QKeySequence(Qt.Key.Key_Delete),self,activated=lambda:self.view.controller.delete_phrase())
+
+    def dropEvent(self, event):
+        super().dropEvent(event); self.view.controller.phrases_reordered()
+
+    def phrase_ids(self):
+        return [self.item(n).data(Qt.ItemDataRole.UserRole) for n in range(self.count())]
+
+
 class Desktop(QMainWindow):
     def __init__(self, config, start_agent=True):
         super().__init__(); self.config = config; self.closing = False
@@ -390,16 +410,35 @@ class Desktop(QMainWindow):
         elif index.column() == 3: self.controller.label_menu(key,index)
 
     def build_tts(self):
-        area = QVBoxLayout(self.page_widgets[2]); area.setContentsMargins(0,0,0,0); area.setSpacing(12)
+        page = QVBoxLayout(self.page_widgets[2]); page.setContentsMargins(0,0,0,0); page.setSpacing(12)
         tools = QWidget(); bar = row(tools); bar.addWidget(QLabel('Voice')); self.voice = QComboBox(); self.voice.setMinimumWidth(260); bar.addWidget(self.voice); bar.addWidget(QLabel('Speaker')); self.speaker = QComboBox(); self.speaker.setMinimumWidth(150); bar.addWidget(self.speaker)
-        bar.addWidget(button('Manage voices',lambda:self.controller.manage_voices(),'speech')); self.tts_volume = self.volume(bar,'tts_volume'); bar.addStretch(); area.addWidget(tools)
+        bar.addWidget(button('Manage voices',lambda:self.controller.manage_voices(),'speech')); self.tts_volume = self.volume(bar,'tts_volume'); bar.addStretch(); page.addWidget(tools)
+        # Typed speech and translation (left), saved phrases ready to play (right).
+        split = QSplitter(); split.setChildrenCollapsible(False); speech = QWidget(); split.addWidget(speech); split.addWidget(self.build_phrases())
+        split.setStretchFactor(0,3); split.setStretchFactor(1,2); split.setSizes([740,420]); page.addWidget(split,1)
+        area = QVBoxLayout(speech); area.setContentsMargins(0,0,0,0); area.setSpacing(12)
         area.addWidget(QLabel('TEXT TO SPEECH')); self.tts = SpeechInput(); self.tts.setPlaceholderText('Enter text, then press Enter to speak. Shift+Enter adds a line.'); self.tts.setFixedHeight(160); area.addWidget(self.tts)
         controls = QWidget(); buttons = row(controls); self.play_text_button = button('Play text',lambda:self.controller.play_text(),'play',True); buttons.addWidget(self.play_text_button); buttons.addWidget(button('Stop speech / clips',lambda:self.controller.send({'type':'local_stop','guild_id':None}),'stop')); buttons.addStretch(); area.addWidget(controls)
-        area.addWidget(QLabel('Piper · Generated locally, no API fees · Ctrl+Backspace deletes a word · Shift+Backspace clears text'))
+        area.addWidget(hint('Piper · Generated locally, no API fees · Ctrl+Backspace deletes a word · Shift+Backspace clears text'))
         translate = QWidget(); line = row(translate); line.addWidget(QLabel('Translate from')); self.source = QComboBox(); self.source.addItems(engine.LANGUAGES); self.source.setCurrentText(self.config.get('translation_source','English')); line.addWidget(self.source); line.addWidget(QLabel('to')); self.target = QComboBox(); self.target.addItems(engine.LANGUAGES); self.target.setCurrentText(self.config.get('translation_target','German')); line.addWidget(self.target)
         self.translate = button('Translate',lambda:self.controller.translate_text()); self.translated_play = button('Play translated',lambda:self.controller.play_translated(),'play'); self.translated_play.setEnabled(False); line.addWidget(self.translate); line.addWidget(self.translated_play); line.addStretch(); area.addWidget(translate)
-        self.translation = QTextEdit(); self.translation.setReadOnly(True); self.translation.setFixedHeight(130); area.addWidget(self.translation); area.addWidget(QLabel('Translation runs locally. First use downloads the required language models.')); area.addStretch()
+        self.translation = QTextEdit(); self.translation.setReadOnly(True); self.translation.setFixedHeight(130); area.addWidget(self.translation); area.addWidget(hint('Translation runs locally. First use downloads the required language models.')); area.addStretch()
         self.voice.currentTextChanged.connect(lambda:self.controller.save_tts_voice() if hasattr(self,'controller') else None); self.speaker.currentTextChanged.connect(lambda:self.controller.save_tts_voice() if hasattr(self,'controller') else None)
+
+    def build_phrases(self):
+        panel = QWidget(); area = QVBoxLayout(panel); area.setContentsMargins(10,0,0,0); area.setSpacing(8)
+        area.addWidget(QLabel('SAVED PHRASES'))
+        entry = QWidget(); line = row(entry)
+        self.phrase_input = QLineEdit(); self.phrase_input.setClearButtonEnabled(True); self.phrase_input.setMaxLength(engine.MAX_TEXT)
+        self.phrase_input.setPlaceholderText('Type a phrase, then press Enter to save it')
+        self.phrase_input.returnPressed.connect(lambda:self.controller.add_phrase()); line.addWidget(self.phrase_input,1)
+        line.addWidget(button('Save',lambda:self.controller.add_phrase(),'save')); area.addWidget(entry)
+        tools = QWidget(); bar = row(tools)
+        from_box = button('Save text box',lambda:self.controller.add_phrase(self.tts.toPlainText()),'arrow'); from_box.setToolTip('Save the text in the speech box as a phrase'); bar.addWidget(from_box)
+        bar.addWidget(button('Stop',lambda:self.controller.send({'type':'local_stop','guild_id':None}),'stop')); bar.addStretch(); area.addWidget(tools)
+        self.phrases = PhraseList(self); area.addWidget(self.phrases,1)
+        area.addWidget(hint('Click to play instantly · saved with the current voice · drag to reorder · right-click to edit or delete'))
+        return panel
 
     def clipboard_play(self):
         # Typing in a text box (e.g. the music link box): paste normally.

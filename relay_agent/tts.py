@@ -137,6 +137,41 @@ class PiperSpeech:
                 temporary.unlink(missing_ok=True)
         return folder / (voice_id + '.onnx')
 
+    def audio_name(self, text, voice_id, speaker_id):
+        # A re-created clone with the same name must not reuse old audio.
+        version = str(self.cloning.reference_version(voice_id)) if engine_of(voice_id) == 'clone' else ''
+        return hashlib.sha256((voice_id + str(speaker_id) + version + text.strip()).encode()).hexdigest() + '.wav'
+
+    def phrase_path(self, text, voice_id=VOICE, speaker_id=0):
+        """Where a saved phrase's audio lives. Kept apart from the trimmed message cache."""
+        return self.directory / 'phrases' / self.audio_name(text, voice_id, speaker_id)
+
+    def preload_phrase(self, text, voice_id=VOICE, speaker_id=0):
+        """Generate a saved phrase ahead of time so playing it needs no synthesis."""
+        target = self.phrase_path(text, voice_id, speaker_id)
+        if target.is_file() and target.stat().st_size:
+            return target
+        source = self.synthesize(text, voice_id, speaker_id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix('.tmp')
+        try:
+            shutil.copyfile(source, temporary)
+            temporary.replace(target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return target
+
+    def remove_phrases(self, keep):
+        """Delete saved-phrase audio that no saved phrase uses any more."""
+        folder = self.directory / 'phrases'
+        keep = {Path(path).name for path in keep}
+        for path in folder.glob('*.wav') if folder.is_dir() else ():
+            if path.name not in keep:
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError:
+                    pass  # Still streaming on Windows; the next cleanup removes it.
+
     def synthesize(self, text, voice_id=VOICE, speaker_id=0):
         if voice_id not in VOICE_OPTIONS.values():
             raise ValueError("Choose a supported voice.")
@@ -149,9 +184,7 @@ class PiperSpeech:
             cache = self.directory / 'audio'
             cache.mkdir(parents=True, exist_ok=True)
             engine = engine_of(voice_id)
-            # A re-created clone with the same name must not reuse old audio.
-            version = str(self.cloning.reference_version(voice_id)) if engine == 'clone' else ''
-            target = cache / (hashlib.sha256((voice_id + str(speaker_id) + version + text).encode()).hexdigest() + '.wav')
+            target = cache / self.audio_name(text, voice_id, speaker_id)
             if target.is_file():
                 return target
             if engine != 'piper':
