@@ -648,6 +648,7 @@ class RelayAgent:
         self.local_files = {}
         self.tts_files = {}
         self.tts_lock = asyncio.Lock()
+        self.phrase_lock = asyncio.Lock()
         self.speech = PiperSpeech(FILES_DIR / "TTS", FFMPEG_PATH)
         self.translator = LocalTranslator(FILES_DIR / "Translation")
         self.normalization_cache = dict(config.get("clip_normalization", {}))
@@ -1022,6 +1023,37 @@ class RelayAgent:
             self.events.put({"error": "Could not play text: " + clean_error(exc)})
         finally:
             self.events.put({"tts_done": True})
+
+    async def preload_phrases(self, phrases):
+        """Generate saved phrases one at a time, reporting each as it becomes playable."""
+        async with self.phrase_lock:
+            for phrase in phrases:
+                try:
+                    path = await asyncio.to_thread(self.speech.preload_phrase, phrase["text"],
+                                                   phrase["voice"], phrase.get("speaker", 0))
+                    try:
+                        await self.normalize_clip(path)  # So the first play skips loudness analysis.
+                    except (OSError, ValueError, asyncio.TimeoutError):
+                        pass  # Playback retries the analysis.
+                    self.events.put({"phrase_ready": phrase["id"], "phrase_path": str(path)})
+                except Exception as exc:
+                    self.events.put({"phrase_failed": phrase["id"],
+                                     "error": "Could not preload phrase: " + clean_error(exc)})
+
+    async def play_phrase(self, path):
+        """Play an already generated phrase through the bot, like a soundboard clip."""
+        try:
+            if self.websocket is None:
+                raise ValueError("Connect your relay token before playing text.")
+            path = Path(path)
+            if not path.is_file():
+                raise ValueError("This phrase's audio is missing. Right-click it and choose Regenerate.")
+            file_id = "tts:" + path.stem
+            self.tts_files[file_id] = path
+            await self.send_json({"type": "local_play", "guild_id": None,
+                                  "file_id": file_id, "title": "Text to speech"})
+        except Exception as exc:
+            self.events.put({"error": "Could not play phrase: " + clean_error(exc)})
 
     async def handle_command(self, raw):
         try:

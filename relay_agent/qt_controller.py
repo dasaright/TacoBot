@@ -4,12 +4,13 @@ import hashlib
 import shutil
 import threading
 import time
+import uuid
 from collections import OrderedDict
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QFileSystemWatcher
 from PySide6.QtGui import QAction, QColor, QBrush, QPixmap
-from PySide6.QtWidgets import (QApplication, QMenu, QFileDialog, QInputDialog, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QListWidgetItem, QMenu, QFileDialog, QInputDialog, QMessageBox,
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QLineEdit,
     QTreeWidget, QAbstractItemView, QCheckBox)
 
@@ -54,6 +55,8 @@ class Controller(engine.RelayWindow):
         view.voice.addItems([label for label,voice in engine.VOICE_OPTIONS.items() if voice in enabled])
         self.tts_voice.set(next((label for label,voice in engine.VOICE_OPTIONS.items() if voice == current),view.voice.currentText()))
         self.refresh_enabled_voices()
+        self.phrase_paths = {}; self.phrase_failed = set(); self.render_phrases()
+        if start_agent: self.preload_phrases(self.config.get('tts_phrases',[]))
         self.update_check_running = False; self.pending_update = None; self.update_idle_since = None
         failed = engine.FILES_DIR/'update-status.txt'
         self.next_update_check = time.monotonic()+21600 if failed.is_file() and 'failed' in failed.read_text(encoding='utf-8-sig',errors='replace').lower() else 0
@@ -557,6 +560,130 @@ class Controller(engine.RelayWindow):
             if query in label.casefold(): self.voice_models.insert('','end',iid=voice,values=(label,'Yes' if self.agent.speech.downloaded(voice) else 'No','✓' if voice in enabled else '',engine.VOICE_CATALOG[voice]['speakers']))
         self.voice_models.selection_set([key for key in selected if self.voice_models.exists(key)])
 
+    # Saved phrases: generated ahead of time so a click plays them without waiting on synthesis.
+    def phrase(self,phrase_id):
+        return next((item for item in self.config.get('tts_phrases',[]) if item['id']==phrase_id),None)
+
+    def phrase_label(self,phrase):
+        info=engine.VOICE_CATALOG.get(phrase['voice'])
+        voice=info['name'] if info else 'removed voice'
+        if info and info['speakers']>1:
+            speaker=phrase.get('speaker',0); names=info.get('speaker_names',{})
+            voice+=' · '+str(names.get(speaker,names.get(str(speaker),f'Speaker {speaker}')))
+        if phrase['id'] in self.phrase_paths: state=''
+        elif phrase['id'] in self.phrase_failed: state='  ⚠ failed, click to retry'
+        else: state='  ⏳ preparing…'
+        return f"{phrase['text']}\n{voice}{state}"
+
+    def render_phrases(self):
+        widget=self.view.phrases; selected={item.data(Qt.ItemDataRole.UserRole) for item in widget.selectedItems()}
+        scroll=widget.verticalScrollBar().value(); widget.clear()
+        for phrase in self.config.get('tts_phrases',[]):
+            item=QListWidgetItem(self.phrase_label(phrase)); item.setData(Qt.ItemDataRole.UserRole,phrase['id'])
+            item.setToolTip(phrase['text'])
+            if phrase['id'] not in self.phrase_paths: item.setForeground(QBrush(QColor('#f27676' if phrase['id'] in self.phrase_failed else '#8b98a6')))
+            widget.addItem(item); item.setSelected(phrase['id'] in selected)
+        widget.verticalScrollBar().setValue(scroll)
+
+    def current_voice(self):
+        voice=engine.VOICE_OPTIONS.get(self.tts_voice.get())
+        return voice,getattr(self,'tts_speaker_options',{}).get(self.tts_speaker.get(),0)
+
+    def add_phrase(self,text=None):
+        typed=text is None
+        text=(self.view.phrase_input.text() if typed else text).strip()
+        if not text or len(text)>engine.MAX_TEXT:
+            self.status.set(f'Enter a phrase between 1 and {engine.MAX_TEXT} characters.'); return
+        voice,speaker=self.current_voice()
+        if voice is None: self.status.set('Enable a voice in Manage voices first.'); return
+        phrases=self.config.setdefault('tts_phrases',[])
+        existing=next((item for item in phrases if (item['text'],item['voice'],item.get('speaker',0))==(text,voice,speaker)),None)
+        if existing:
+            self.status.set('That phrase is already saved with this voice.')
+        else:
+            existing={'id':uuid.uuid4().hex,'text':text,'voice':voice,'speaker':speaker}; phrases.append(existing); self.save()
+            self.preload_phrases([existing]); self.render_phrases(); self.status.set('Saved phrase. Preparing its audio…')
+        if typed: self.view.phrase_input.clear()
+        self.view.phrases.setCurrentRow(self.view.phrases.phrase_ids().index(existing['id']))
+
+    def preload_phrases(self,phrases):
+        phrases=[dict(item) for item in phrases]
+        for item in phrases: self.phrase_failed.discard(item['id']); self.phrase_paths.pop(item['id'],None)
+        if phrases and self.started: asyncio.run_coroutine_threadsafe(self.agent.preload_phrases(phrases),self.loop)
+
+    def play_phrase(self,phrase_id):
+        if QApplication.keyboardModifiers() & (Qt.KeyboardModifier.ShiftModifier|Qt.KeyboardModifier.ControlModifier): return
+        phrase=self.phrase(phrase_id)
+        if phrase is None: return
+        if phrase_id in self.phrase_failed:
+            self.preload_phrases([phrase]); self.render_phrases(); self.status.set('Retrying this phrase…'); return
+        path=self.phrase_paths.get(phrase_id)
+        if path is None: self.status.set('This phrase is still being prepared. Try again in a moment.'); return
+        asyncio.run_coroutine_threadsafe(self.agent.play_phrase(path),self.loop)
+
+    def phrase_menu(self,point):
+        item=self.view.phrases.itemAt(point)
+        if item is None: return
+        phrase_id=item.data(Qt.ItemDataRole.UserRole); self.view.phrases.setCurrentItem(item)
+        menu=QMenu(self.view)
+        menu.addAction('Play',lambda:self.play_phrase(phrase_id))
+        menu.addAction('Edit text',lambda:self.edit_phrase(phrase_id))
+        menu.addAction('Use current voice',lambda:self.revoice_phrase(phrase_id))
+        menu.addAction('Regenerate',lambda:self.regenerate_phrase(phrase_id))
+        menu.addAction('Copy to text box',lambda:self.view.tts.setPlainText(self.phrase(phrase_id)['text']))
+        menu.addSeparator(); menu.addAction('Delete',lambda:self.delete_phrase(phrase_id))
+        menu.exec(self.view.phrases.viewport().mapToGlobal(point))
+
+    def edit_phrase(self,phrase_id):
+        phrase=self.phrase(phrase_id)
+        if phrase is None: return
+        text,ok=QInputDialog.getText(self.view,'Edit phrase','Phrase:',text=phrase['text'])
+        text=text.strip()
+        if not ok or text==phrase['text']: return
+        if not text or len(text)>engine.MAX_TEXT: self.status.set(f'Enter a phrase between 1 and {engine.MAX_TEXT} characters.'); return
+        phrase['text']=text; self.phrase_changed(phrase)
+
+    def revoice_phrase(self,phrase_id):
+        phrase=self.phrase(phrase_id); voice,speaker=self.current_voice()
+        if phrase is None: return
+        if voice is None: self.status.set('Enable a voice in Manage voices first.'); return
+        phrase['voice'],phrase['speaker']=voice,speaker; self.phrase_changed(phrase)
+
+    def regenerate_phrase(self,phrase_id):
+        phrase=self.phrase(phrase_id)
+        if phrase is None: return
+        speech=self.agent.speech; text,voice,speaker=phrase['text'],phrase['voice'],phrase.get('speaker',0)
+        try:
+            speech.phrase_path(text,voice,speaker).unlink(missing_ok=True)
+            # The message cache holds the same audio; drop it too so the voice really runs again.
+            (speech.directory/'audio'/speech.audio_name(text,voice,speaker)).unlink(missing_ok=True)
+        except OSError as exc: self.status.set('Could not regenerate while it is playing: '+str(exc)); return
+        self.phrase_changed(phrase)
+
+    def phrase_changed(self,phrase):
+        self.save(); self.preload_phrases([phrase]); self.render_phrases(); self.clean_phrase_audio()
+        self.status.set('Preparing phrase audio…')
+
+    def delete_phrase(self,phrase_id=None):
+        if phrase_id is None:
+            item=self.view.phrases.currentItem()
+            if item is None: return
+            phrase_id=item.data(Qt.ItemDataRole.UserRole)
+        self.config['tts_phrases']=[item for item in self.config.get('tts_phrases',[]) if item['id']!=phrase_id]
+        self.phrase_paths.pop(phrase_id,None); self.phrase_failed.discard(phrase_id)
+        self.save(); self.render_phrases(); self.clean_phrase_audio()
+
+    def phrases_reordered(self):
+        order={key:n for n,key in enumerate(self.view.phrases.phrase_ids())}
+        self.config['tts_phrases']=sorted(self.config.get('tts_phrases',[]),key=lambda item:order.get(item['id'],len(order)))
+        self.save()
+
+    def clean_phrase_audio(self):
+        if not self.started: return
+        speech=self.agent.speech
+        keep=[speech.phrase_path(item['text'],item['voice'],item.get('speaker',0)) for item in self.config.get('tts_phrases',[])]
+        threading.Thread(target=speech.remove_phrases,args=(keep,),daemon=True).start()
+
     def poll(self):
         started=time.monotonic()
         while not self.agent.events.empty() and time.monotonic()-started<.004:
@@ -682,6 +809,11 @@ class Controller(engine.RelayWindow):
             self.view.translate.setEnabled(True)
             if 'translated_text' in event: self.view.translation.setPlainText(event['translated_text']); self.translated_language=event['translated_language']; self.view.translated_play.setEnabled(True)
         if event.get('tts_done'): self.view.play_text_button.setEnabled(True)
+        if event.get('phrase_ready') or event.get('phrase_failed'):
+            phrase_id=event.get('phrase_ready') or event['phrase_failed']
+            if event.get('phrase_ready'): self.phrase_paths[phrase_id]=Path(event['phrase_path']); self.phrase_failed.discard(phrase_id)
+            else: self.phrase_failed.add(phrase_id); self.phrase_paths.pop(phrase_id,None)
+            self.render_phrases()
         if 'music' in event: self.render_music(event['music'])
         error=event.get('error') or event.get('clip_edit_error') or event.get('share_error') or event.get('direct_failed')
         if error or event.get('status'): self.status.set(error or event['status'])
