@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 if sys.platform != 'win32': os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QMessageBox
 from relay_agent.tts import PiperSpeech
 from relay_agent.main import RelayAgent
 
@@ -137,6 +138,74 @@ class PhrasePaneTests(unittest.TestCase):
         w.phrases.setCurrentRow(0); c.delete_phrase()
         self.assertEqual([p['id'] for p in self.saved['tts_phrases']], ['old'])
         self.assertEqual(w.phrases.phrase_ids(), ['old'])
+
+
+class PhraseCategoryTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from relay_agent.desktop import application
+        cls.app = application()
+
+    def setUp(self):
+        from relay_agent.qt_desktop import Desktop
+        voice = 'en_US-lessac-medium'
+        self.saved = {'tts_phrase_categories': ['Supportive'],
+                      'tts_phrases': [{'id': 's1', 'text': 'You got this', 'voice': voice, 'speaker': 0, 'category': 'Supportive'},
+                                      {'id': 's2', 'text': 'Nice try', 'voice': voice, 'speaker': 0, 'category': 'Supportive'},
+                                      {'id': 'x', 'text': 'Hello', 'voice': voice, 'speaker': 0}]}
+        self.window = Desktop(self.saved, start_agent=False); self.window.show(); self.app.processEvents()
+        self.c = self.window.controller; self.c.save = Mock()
+
+    def tearDown(self):
+        self.window.close(); self.app.processEvents()
+
+    def buttons(self):
+        grid = self.window.category_grid
+        return [grid.itemAt(n).widget() for n in range(grid.count())]
+
+    def test_each_category_has_a_button_that_plays_a_random_ready_member(self):
+        c = self.c
+        self.assertEqual([b.text() for b in self.buttons()], ['Supportive  (2)'])
+        self.assertFalse(self.window.category_hint.isVisibleTo(self.window))
+        with patch.object(c, 'play_phrase') as play:
+            self.buttons()[0].click(); play.assert_not_called()
+            self.assertIn('still being prepared', self.window.status.text())
+            for key in ('s1', 's2', 'x'): c.handle_event({'phrase_ready': key, 'phrase_path': key + '.wav'})
+            picks = []
+            for _ in range(20):
+                self.buttons()[0].click(); picks.append(play.call_args.args[0])
+        self.assertEqual(set(picks), {'s1', 's2'})
+        self.assertTrue(all(a != b for a, b in zip(picks, picks[1:])), 'Should not repeat the previous pick')
+
+    def test_adding_a_category_adds_a_button_and_new_phrases_go_into_it(self):
+        c, w = self.c, self.window
+        with patch('relay_agent.qt_controller.QInputDialog.getText', return_value=('  Hype  ', True)):
+            c.add_category()
+        self.assertEqual(self.saved['tts_phrase_categories'], ['Supportive', 'Hype'])
+        self.assertEqual([b.text() for b in self.buttons()], ['Supportive  (2)', 'Hype  (0)'])
+        self.assertEqual(w.phrase_category.currentData(), 'Hype')
+        with patch.object(c, 'preload_phrases'): c.add_phrase('Lets go')
+        self.assertEqual(self.saved['tts_phrases'][-1]['category'], 'Hype')
+        with patch.object(c, 'play_phrase') as play:
+            self.buttons()[1].click(); play.assert_not_called()
+        with patch('relay_agent.qt_controller.QInputDialog.getText', return_value=('hype', True)):
+            self.assertIsNone(c.add_category())
+        self.assertEqual(len(self.saved['tts_phrase_categories']), 2)
+
+    def test_assign_rename_and_delete_category(self):
+        c = self.c
+        c.set_phrase_category('x', 'Supportive')
+        self.assertEqual(self.buttons()[0].text(), 'Supportive  (3)')
+        self.assertIn('Supportive', self.window.phrases.item(2).text())
+        with patch('relay_agent.qt_controller.QInputDialog.getText', return_value=('Kind', True)):
+            c.rename_category('Supportive')
+        self.assertEqual({p.get('category') for p in self.saved['tts_phrases']}, {'Kind'})
+        with patch('relay_agent.qt_controller.QMessageBox.question', return_value=QMessageBox.StandardButton.Yes):
+            c.delete_category('Kind')
+        self.assertEqual(self.saved['tts_phrase_categories'], [])
+        self.assertEqual(len(self.saved['tts_phrases']), 3)
+        self.assertFalse(any('category' in p for p in self.saved['tts_phrases']))
+        self.assertEqual(self.buttons(), [])
 
 
 if __name__ == '__main__':

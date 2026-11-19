@@ -8,7 +8,7 @@ import sys
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QMimeData, QPoint, QSize
 from PySide6.QtGui import QColor, QPainter, QPen, QIcon, QImage, QPixmap, QDrag, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QStackedLayout, QPushButton, QLabel, QCheckBox, QLineEdit, QSlider, QTableView,
+    QStackedLayout, QGridLayout, QPushButton, QLabel, QCheckBox, QLineEdit, QSlider, QTableView,
     QStyledItemDelegate, QTreeWidget, QListWidget, QListWidgetItem, QAbstractItemView, QSplitter, QTextEdit,
     QComboBox, QSizePolicy, QMenu, QFileDialog, QInputDialog, QMessageBox, QDialog, QHeaderView, QSystemTrayIcon, QSpinBox)
 
@@ -24,6 +24,8 @@ QPushButton:pressed { background:#34564f; }
 QPushButton:checked { background:#243c37; color:#52d4ba; font-weight:600; }
 QPushButton:disabled { color:#62707c; background:#1b2027; }
 QPushButton[primary="true"] { background:#52d4ba; color:#10211e; }
+QPushButton[category="true"] { background:#243c37; color:#52d4ba; font-weight:600; border:1px solid #34564f; }
+QPushButton[category="true"]:hover { background:#2d4a44; }
 QLineEdit,QTextEdit,QComboBox { background:#1b2027; border:0; border-radius:5px; padding:6px; }
 QTreeView,QTableView,QListView { background:#1b2027; alternate-background-color:#191e25; border:0; outline:0; }
 QTreeView::item,QTableView::item { padding:2px 5px; }
@@ -434,10 +436,18 @@ class Desktop(QMainWindow):
         self.phrase_input.returnPressed.connect(lambda:self.controller.add_phrase()); line.addWidget(self.phrase_input,1)
         line.addWidget(button('Save',lambda:self.controller.add_phrase(),'save')); area.addWidget(entry)
         tools = QWidget(); bar = row(tools)
+        bar.addWidget(QLabel('Save to')); self.phrase_category = QComboBox(); self.phrase_category.setMinimumWidth(140)
+        self.phrase_category.setToolTip('Category for newly saved phrases'); self.phrase_category.activated.connect(lambda:self.controller.save_phrase_category()); bar.addWidget(self.phrase_category)
         from_box = button('Save text box',lambda:self.controller.add_phrase(self.tts.toPlainText()),'arrow'); from_box.setToolTip('Save the text in the speech box as a phrase'); bar.addWidget(from_box)
-        bar.addWidget(button('Stop',lambda:self.controller.send({'type':'local_stop','guild_id':None}),'stop')); bar.addStretch(); area.addWidget(tools)
+        bar.addStretch(); bar.addWidget(button('Stop',lambda:self.controller.send({'type':'local_stop','guild_id':None}),'stop')); area.addWidget(tools)
+        # One button per category; a click plays a random ready phrase from it.
+        heading = QWidget(); head = row(heading); head.addWidget(QLabel('CATEGORIES')); head.addStretch()
+        add_category = button('+ Category',lambda:self.controller.add_category()); add_category.setToolTip('Add a category and its button'); head.addWidget(add_category); area.addWidget(heading)
+        self.category_host = QWidget(); self.category_grid = QGridLayout(self.category_host); self.category_grid.setContentsMargins(0,0,0,0); self.category_grid.setSpacing(8)
+        area.addWidget(self.category_host)
+        self.category_hint = hint('Add a category, put phrases in it, then click its button to play a random one.'); area.addWidget(self.category_hint)
         self.phrases = PhraseList(self); area.addWidget(self.phrases,1)
-        area.addWidget(hint('Click to play instantly · saved with the current voice · drag to reorder · right-click to edit or delete'))
+        area.addWidget(hint('Click to play instantly · saved with the current voice · drag to reorder · right-click to edit, categorize or delete'))
         return panel
 
     def clipboard_play(self):
