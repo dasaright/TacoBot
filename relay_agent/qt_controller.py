@@ -1,6 +1,7 @@
 """Reuse the established audio/network/update actions with native Qt controls."""
 import asyncio
 import hashlib
+import random
 import shutil
 import threading
 import time
@@ -567,6 +568,7 @@ class Controller(engine.RelayWindow):
     def phrase_label(self,phrase):
         info=engine.VOICE_CATALOG.get(phrase['voice'])
         voice=info['name'] if info else 'removed voice'
+        if phrase.get('category'): voice=phrase['category']+' · '+voice
         if info and info['speakers']>1:
             speaker=phrase.get('speaker',0); names=info.get('speaker_names',{})
             voice+=' · '+str(names.get(speaker,names.get(str(speaker),f'Speaker {speaker}')))
@@ -584,6 +586,110 @@ class Controller(engine.RelayWindow):
             if phrase['id'] not in self.phrase_paths: item.setForeground(QBrush(QColor('#f27676' if phrase['id'] in self.phrase_failed else '#8b98a6')))
             widget.addItem(item); item.setSelected(phrase['id'] in selected)
         widget.verticalScrollBar().setValue(scroll)
+        self.render_categories()
+
+    def phrase_categories(self):
+        return self.config.setdefault('tts_phrase_categories',[])
+
+    def render_categories(self):
+        """Rebuild the category buttons and the "Save to" picker from the saved categories."""
+        grid=self.view.category_grid
+        phrases=self.config.get('tts_phrases',[]); categories=self.phrase_categories()
+        counts=[(name,sum(item.get('category')==name for item in phrases)) for name in categories]
+        if counts!=getattr(self,'category_buttons_shown',None):
+            self.category_buttons_shown=counts
+            while grid.count():
+                widget=grid.takeAt(0).widget()
+                if widget: widget.hide(); widget.deleteLater()
+            self.add_category_buttons(phrases,categories)
+        self.view.category_hint.setVisible(not categories)
+        combo=self.view.phrase_category; wanted=self.config.get('tts_phrase_save_category')
+        if wanted not in categories: wanted=None
+        combo.blockSignals(True); combo.clear(); combo.addItem('No category',None)
+        for name in categories: combo.addItem(name,name)
+        combo.setCurrentIndex(max(0,combo.findData(wanted)) if wanted else 0); combo.blockSignals(False)
+
+    def add_category_buttons(self,phrases,categories):
+        grid=self.view.category_grid
+        from .qt_desktop import button
+        for n,name in enumerate(categories):
+            members=[item for item in phrases if item.get('category')==name]
+            widget=button(f'{name}  ({len(members)})',lambda checked=False,name=name:self.play_category(name))
+            widget.setToolTip(f'Play a random {name} phrase · right-click to rename or delete'); widget.setMinimumHeight(38); widget.setProperty('category',True)
+            widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            widget.customContextMenuRequested.connect(lambda point,name=name,widget=widget:self.category_menu(name,widget.mapToGlobal(point)))
+            grid.addWidget(widget,n//3,n%3)
+
+    def save_phrase_category(self):
+        self.config['tts_phrase_save_category']=self.view.phrase_category.currentData(); self.save()
+
+    def category_name(self,title,text=''):
+        name,ok=QInputDialog.getText(self.view,title,'Category name:',text=text)
+        name=' '.join(name.split())
+        if not ok or not name or name==text: return None
+        if len(name)>40: self.status.set('Keep category names to 40 characters.'); return None
+        if any(existing.casefold()==name.casefold() and existing!=text for existing in self.phrase_categories()):
+            self.status.set(f'There is already a {name} category.'); return None
+        return name
+
+    def add_category(self):
+        name=self.category_name('Add category')
+        if name is None: return None
+        self.phrase_categories().append(name); self.config['tts_phrase_save_category']=name
+        self.save(); self.render_phrases(); self.status.set(f'Added {name}. New phrases are saved to it.')
+        return name
+
+    def rename_category(self,old):
+        name=self.category_name('Rename category',old)
+        if name is None: return
+        categories=self.phrase_categories(); categories[categories.index(old)]=name
+        for item in self.config.get('tts_phrases',[]):
+            if item.get('category')==old: item['category']=name
+        if self.config.get('tts_phrase_save_category')==old: self.config['tts_phrase_save_category']=name
+        self.save(); self.render_phrases()
+
+    def delete_category(self,name):
+        members=[item for item in self.config.get('tts_phrases',[]) if item.get('category')==name]
+        if members and QMessageBox.question(self.view,'Delete category',f'Delete the {name} category? Its {len(members)} phrase(s) are kept without a category.')!=QMessageBox.StandardButton.Yes: return
+        for item in members: item.pop('category',None)
+        self.config['tts_phrase_categories']=[item for item in self.phrase_categories() if item!=name]
+        self.save(); self.render_phrases()
+
+    def move_category(self,name,step):
+        categories=self.phrase_categories(); n=categories.index(name); target=n+step
+        if 0<=target<len(categories):
+            categories[n],categories[target]=categories[target],categories[n]; self.save(); self.render_categories()
+
+    def category_menu(self,name,position):
+        menu=QMenu(self.view)
+        menu.addAction('Play random',lambda:self.play_category(name))
+        menu.addAction('Rename',lambda:self.rename_category(name))
+        categories=self.phrase_categories()
+        menu.addAction('Move left',lambda:self.move_category(name,-1)).setEnabled(categories.index(name)>0)
+        menu.addAction('Move right',lambda:self.move_category(name,1)).setEnabled(categories.index(name)<len(categories)-1)
+        menu.addSeparator(); menu.addAction('Delete',lambda:self.delete_category(name))
+        menu.exec(position)
+
+    def set_phrase_category(self,phrase_id,name):
+        phrase=self.phrase(phrase_id)
+        if phrase is None: return
+        if name: phrase['category']=name
+        else: phrase.pop('category',None)
+        self.save(); self.render_phrases()
+
+    def new_category_for(self,phrase_id):
+        name=self.add_category()
+        if name: self.set_phrase_category(phrase_id,name)
+
+    def play_category(self,name):
+        """Play a random ready phrase from a category, avoiding an immediate repeat."""
+        members=[item for item in self.config.get('tts_phrases',[]) if item.get('category')==name]
+        ready=[item['id'] for item in members if item['id'] in self.phrase_paths]
+        if not ready:
+            self.status.set(f'No {name} phrases yet. Save a phrase to {name} first.' if not members else f'{name} phrases are still being prepared.'); return
+        last=getattr(self,'last_category_pick',{}); choices=[key for key in ready if key!=last.get(name)] or ready
+        choice=random.choice(choices); last[name]=choice; self.last_category_pick=last
+        self.play_phrase(choice)
 
     def current_voice(self):
         voice=engine.VOICE_OPTIONS.get(self.tts_voice.get())
@@ -601,7 +707,10 @@ class Controller(engine.RelayWindow):
         if existing:
             self.status.set('That phrase is already saved with this voice.')
         else:
-            existing={'id':uuid.uuid4().hex,'text':text,'voice':voice,'speaker':speaker}; phrases.append(existing); self.save()
+            existing={'id':uuid.uuid4().hex,'text':text,'voice':voice,'speaker':speaker}
+            category=self.view.phrase_category.currentData()
+            if category: existing['category']=category
+            phrases.append(existing); self.save()
             self.preload_phrases([existing]); self.render_phrases(); self.status.set('Saved phrase. Preparing its audio…')
         if typed: self.view.phrase_input.clear()
         self.view.phrases.setCurrentRow(self.view.phrases.phrase_ids().index(existing['id']))
@@ -631,6 +740,11 @@ class Controller(engine.RelayWindow):
         menu.addAction('Use current voice',lambda:self.revoice_phrase(phrase_id))
         menu.addAction('Regenerate',lambda:self.regenerate_phrase(phrase_id))
         menu.addAction('Copy to text box',lambda:self.view.tts.setPlainText(self.phrase(phrase_id)['text']))
+        categories=menu.addMenu('Category'); current=self.phrase(phrase_id).get('category')
+        for name in [None]+self.phrase_categories():
+            action=categories.addAction(name or 'No category'); action.setCheckable(True); action.setChecked(name==current)
+            action.triggered.connect(lambda checked=False,name=name:self.set_phrase_category(phrase_id,name))
+        categories.addSeparator(); categories.addAction('New category…',lambda:self.new_category_for(phrase_id))
         menu.addSeparator(); menu.addAction('Delete',lambda:self.delete_phrase(phrase_id))
         menu.exec(self.view.phrases.viewport().mapToGlobal(point))
 
